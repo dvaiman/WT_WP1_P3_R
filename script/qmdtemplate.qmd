@@ -1,0 +1,56 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute: 
+  warning: false
+  echo: true
+---
+
+# Project description
+
+
+
+
+#-------------------------
+## Libraries
+
+```{r}
+library(tidyverse)
+
+```
+#-------------------------
+## Base theme
+
+```{r}
+theme_set(
+  theme_minimal(
+    base_size = 16,
+    base_family = "Roboto"
+  ) +
+    theme(
+      legend.position = "top",
+      panel.grid.major.y = element_line(),
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.x = element_line(),
+      panel.grid.minor.x = element_blank(),
+      axis.title.y = element_text(margin = margin(r = 10), colour = "grey30"),
+      axis.title.x = element_text(margin = margin(t = 10), colour = "grey30")
+    )
+)
+```
+
+#-------------------------
+## Data
+
+```{r}
+df <- read_csv(here::here(".."))
+
+```
