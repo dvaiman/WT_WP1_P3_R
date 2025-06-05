@@ -1,0 +1,2119 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+Restricted follow-up time models
+
+
+```{r}
+library(tidyverse)
+library(tictoc)
+library(survival)
+library(tidymodels)
+library(censored)
+library(flexsurv)
+library(rms)
+```
+
+
+# data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+# model explainer
+https://modeloriented.github.io/survex/
+tidyAML: Automatic Machine Learning with 'tidymodels'
+https://maple-health-group.github.io/easysurv/articles/easysurv.html
+https://www.emilyzabor.com/survival-analysis-in-r.html
+
+# Flexsurv models, 10 yr risk
+
+Not used in the final version of the manuscript.
+
+```{r}
+
+# ---------- Data where missing covariates ---------------------------------
+
+data_occ  <- data_cvd |>                     
+  filter(!is.na(ssyk_WBHL_group)) |> 
+  group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> 
+  filter(n_cluster > 4) 
+
+data_mun  <- data_cvd |>                    
+  filter(!is.na(ssyk_WBHL_group),
+         !is.na(KommunSize),
+         !is.na(Place_of_origin)) |> 
+  group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> 
+  filter(n_cluster > 4) 
+
+
+
+
+dist_k <- 2
+
+fspline <- function(rhs,
+                    risk_time = "risk_time_art_10yrs",
+                    event     = "risk_art_flag_10yrs",
+                    data,
+                    k     = dist_k,
+                    scale = "hazard") {
+
+  # turn the character names into symbols
+  rt_sym <- as.name(risk_time)
+  ev_sym <- as.name(event)
+
+  # build Surv(time, status) ~ <rhs>
+  fml <- as.formula(
+    substitute(
+      Surv(rt, ev) ~ RHS,
+      list(rt  = rt_sym,
+           ev  = ev_sym,
+           RHS = rhs[[2]])     # pull the RHS of the model formula you pass in
+    )
+  )
+
+  flexsurvspline(
+    formula = fml,
+    data    = data,
+    k       = k,
+    scale   = scale
+  )
+}
+
+
+
+```
+
+
+```{r}
+# ----------------------------------------------------------------------
+# create an empty list that we will fill
+# ----------------------------------------------------------------------
+models <- list()
+
+# ----------------------------------------------------------------------
+#  M1  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M1")
+models[["M1: treated + cohort"]] <-
+  tryCatch(
+    fspline(rhs  = treated + birth_cohort,
+            data = data_cvd),
+    error = function(e) { message("  M1 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M2  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M2")
+models[["M2: + age sex comorb pre-CVD"]] <-
+  tryCatch(
+    fspline(treated + birth_cohort + Age + Sex +
+                    comorbidity + cvd_art_before_HPA_flag,
+            data = data_cvd),
+    error = function(e) { message("  M2 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M3  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M3")
+models[["M3: + income"]] <-
+  tryCatch(
+    fspline(treated + birth_cohort + Age + Sex +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M3 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M4  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M4")
+models[["M4: + Occupation"]] <-
+  tryCatch(
+    fspline(~ treated + birth_cohort + Age + Sex +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI + ssyk_WBHL_group,
+            data = data_occ),    # <- subset where occupation is complete
+    error = function(e) { message("  M4 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M5  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M5")
+models[["M5: + municipality & origin"]] <-
+  tryCatch(
+    fspline(~ treated + birth_cohort + Age + Sex +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI + ssyk_WBHL_group +
+                    KommunSize + Place_of_origin,
+            data = data_mun),    # subset with both vars observed
+    error = function(e) { message("  M5 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M6  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M6")
+models[["M6: M3 × sex"]] <-
+  tryCatch(
+    fspline(~  treated * Sex + birth_cohort + Age +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M6 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M7  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M7")
+models[["M7: M3 × age"]] <-
+  tryCatch(
+    fspline(~ treated * Age + Sex + birth_cohort +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M7 failed: ", e$message); NULL }
+  )
+toc()
+
+tic("M7")
+models[["M7: M3 × age"]] <-
+  tryCatch(
+    fspline(~ treated * age_group + Sex + birth_cohort +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M7 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M8  ──────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
+tic("M8")
+models[["M8: M3 × occupation"]] <-
+  tryCatch(
+    fspline(~ treated * ssyk_WBHL_group + birth_cohort + Age + Sex +
+                    comorbidity + cvd_art_before_HPA_flag +
+                    IncomeLevel_CSFVI,
+            data = data_occ),
+    error = function(e) { message("  M8 failed: ", e$message); NULL }
+  )
+toc()
+
+# ----------------------------------------------------------------------
+#  M9  ─────────────────────────────────────────────────────────────────-
+# ----------------------------------------------------------------------
+tic("M9")
+models[["M9: Number of HPAs + covariates in M3"]] <-
+  tryCatch(
+    fspline(~ n_tests_within_5_fac + Age + Sex +
+                    birth_cohort + comorbidity +
+                    cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M9 failed: ", e$message); NULL }
+  )
+toc()
+
+tic("M10")
+models[["M10: Number of HPAs + covariates in M3, 5yrs"]] <-
+  tryCatch(
+    fspline(~ n_tests_within_5_fac + Age + Sex +
+                    birth_cohort + comorbidity +
+                    cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+            data = data_cvd),
+    error = function(e) { message("  M9 failed: ", e$message); NULL }
+  )
+toc()
+
+```
+
+
+
+## Save models
+
+```{r}
+
+# 10 year
+saveRDS(models, here::here("..", "results", "models", "FPS_10yr_models.rds"))
+
+# five year
+# saveRDS(models, here::here("..", "results", "models", "FPS_models.rds"))
+models <- readRDS(here::here("..", "results", "models", "FPS_10yr_models.rds"))
+```
+
+`M7: M3 × age`
+`M7: M3 x age`
+# -
+#OLD
+## Model type
+
+```{r}
+  fsr_spec <- 
+    survival_reg(dist = "lognormal") %>%
+    set_engine("flexsurvspline", k = 2) %>% 
+    set_mode("censored regression") 
+```
+
+
+## Models
+```{r}
+
+# Initialize an empty list
+models <- list()
+
+# Model 1: Treated only
+models[["Model 1: Treated only + birth cohort"]] <- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated + birth_cohort, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 1: ", e)
+  NULL
+})
+
+# Model 2: + Age, Sex, Comorbidity & CVD before event
+models[["Model 2: + Age, Sex, Comorbidity & CVD before event"]] <- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag, 
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 2: ", e)
+  NULL
+})
+
+# Model 3: + Income 
+models[["Model 3: + Income"]] <- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 3: ", e)
+  NULL
+})
+
+
+# Model 5: + Occupation(dropping NAs for these variables)
+models[["Model 4: + Occupation"]] <- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group, 
+        data = data_cvd |> drop_na(ssyk_WBHL_group) |> 
+        group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> filter(n_cluster > 4))
+}, error = function(e) {
+  message("Error in Model 4: ", e)
+  NULL
+})
+
+# Model 4: + Kommun size & Place_of_origin (dropping NAs for these variables)
+models[["Model 5: + Municipality & Place_of_origin"]] <- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group + KommunSize + Place_of_origin, 
+        data = data_cvd |> drop_na(KommunSize, Place_of_origin + ssyk_WBHL_group) |> 
+        group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> filter(n_cluster > 4))
+}, error = function(e) {
+  message("Error in Model 4: ", e)
+  NULL
+})
+
+# Model 5: M3 + Interaction with sex
+models[["Model 6: M3 + Interaction with sex"]] <- tryCatch({
+  fsr_spec %>%
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated * Sex + birth_cohort + Age + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 5: ", e)
+  NULL
+})
+
+# Model 6: M3 + Interaction with age
+models[["Model 7: M3 + Interaction with age"]] <- tryCatch({
+  fsr_spec %>%
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated * Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 6: ", e)
+  NULL
+})
+
+# Model 7: M3 + Interaction with number of tests
+models[["Model 8: M3 + number of tests"]] <- tryCatch({
+  fsr_spec %>%
+    fit(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ n_tests_within_10_fac + Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 7: ", e)
+  NULL
+})
+
+
+
+```
+
+
+# remove when finished
+```{r}
+m_income<- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 3: ", e)
+  NULL
+})
+
+models$"Model 3: + Income & Occupation" |>  tidy(fit_inc, exponentiate = TRUE,  transform = "coefs.exp")
+
+
+m_income<- tryCatch({
+  fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI + EducationLevel, data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 3: ", e)
+  NULL
+})
+
+
+fit_inc <- flexsurvspline(
+  formula = Surv(risk_time_art, risk_art_flag) ~ 
+    treated + Sex +
+    Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
+    IncomeLevel_CSFVI,
+  data  = data_cvd,
+  k     = 2,
+  scale = "hazard"
+)
+
+tidy(fit_inc, exponentiate = TRUE,  transform = "coefs.exp")
+models$"Model 3: + Income & Occupation" |> extract_fit_engine() |>  tidy(fit_inc, transform = "coefs.exp")
+
+fit_inc_cox |>  tidy(conf.int = TRUE, exponentiate = TRUE)
+
+fit_inc_cox <- coxph(
+  formula = Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ 
+    n_tests_within_10_fac + Sex +
+    Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
+    IncomeLevel_CSFVI,
+  data  = data_cvd
+)
+
+fit_inc_cox |>  tidy(conf.int = TRUE, exponentiate = TRUE)
+```
+
+
+
+
+## Get estimates
+
+```{r}
+
+
+# Tidy each model's output, filter for the treated term, and combine them
+
+treated_estimates <- models |>
+  imap_dfr(~ broom::tidy(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+
+# View the combined estimates
+treated_estimates |> print(n=150)
+
+
+
+
+ models |>
+  imap_dfr(~ broom::glance(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+```
+
+
+
+## Get interaction estimates
+
+## Sex
+	1.	Extract Coefficients and VCOV:
+Use broom (or directly via coef() and vcov()) to grab the estimate and the covariance between the main treatment effect (for example, treatedHPA) and its interaction (for example, treatedHPA:SexWomen).
+	2.	Combine Using the Delta Method:
+For women, compute:
+\text{Log-HR}{\text{women}} = \text{treatedHPA} + \text{treatedHPA:SexWomen}
+and the variance as:
+\text{Var}(\text{Log-HR}{\text{women}}) = \text{Var}(\text{treatedHPA}) + \text{Var}(\text{treatedHPA:SexWomen}) + 2\,\text{Cov}(\text{treatedHPA}, \text{treatedHPA:SexWomen}).
+Then, calculate the standard error and the 95% confidence interval on the log scale, and exponentiate to get the hazard ratio and its CI.
+```{r}
+
+
+# Extract coefficients and variance-covariance matrix from the fitted model:
+coefs <- coef(extract_fit_engine(models[["Model 5: M3 + Interaction with sex"]]))
+vcov_mat <- vcov(extract_fit_engine(models[["Model 5: M3 + Interaction with sex"]]))
+
+# For men (reference level)
+log_hr_men <- coefs["treatedHPA"]
+se_men <- sqrt(vcov_mat["treatedHPA", "treatedHPA"])
+
+# For women (combine main effect and interaction)
+log_hr_women <- coefs["treatedHPA"] + coefs["treatedHPA:SexWomen"]
+var_women <- vcov_mat["treatedHPA", "treatedHPA"] +
+             vcov_mat["treatedHPA:SexWomen", "treatedHPA:SexWomen"] +
+             2 * vcov_mat["treatedHPA", "treatedHPA:SexWomen"]
+se_women <- sqrt(var_women)
+
+# Calculate hazard ratios and 95% CIs
+results_sex <- tibble(
+  term = c("HPA_Men", "HPA_Women"),
+  estimate = c(exp(log_hr_men), exp(log_hr_women)),
+  conf.low = c(exp(log_hr_men - 1.96 * se_men), exp(log_hr_women - 1.96 * se_women)),
+  conf.high = c(exp(log_hr_men + 1.96 * se_men), exp(log_hr_women + 1.96 * se_women)),
+  model = "M3 + Interaction with sex"
+)
+results_sex
+```
+
+
+## Age
+
+
+```{r}
+# Assuming your fitted flexsurv model with treated*Age interaction is fit_age.
+coefs_age <- coef(extract_fit_engine(models[["Model 6: M3 + Interaction with age"]]))
+vcov_age <- vcov(extract_fit_engine(models[["Model 6: M3 + Interaction with age"]]))
+
+# Define the ages at which to compute the effect:
+ages <- c(25, 35, 45, 55, 65)
+
+# Compute HRs for each age:
+result_age <- sapply(ages, function(A) {
+  beta_effect <- coefs_age["treatedHPA"] + coefs_age["treatedHPA:Age"] * A
+  var_effect <- vcov_age["treatedHPA", "treatedHPA"] +
+                A^2 * vcov_age["treatedHPA:Age", "treatedHPA:Age"] +
+                2 * A * vcov_age["treatedHPA", "treatedHPA:Age"]
+  se_effect <- sqrt(var_effect)
+  HR <- exp(beta_effect)
+  HR_LCI <- exp(beta_effect - 1.96 * se_effect)
+  HR_UCI <- exp(beta_effect + 1.96 * se_effect)
+  c(HR = HR, LCI = HR_LCI, UCI = HR_UCI)
+})
+
+# Organize the results in a data frame:
+result_age_df <- data.frame(
+  term = glue::glue("Age", " {ages}"),
+  estimate = result_age[1, ],
+  #t(result_age), # transpose to get rows by age
+  conf.low = result_age[2, ],
+  conf.high = result_age[3, ],
+  model = "M3 + Interaction with age"
+  ) 
+
+result_age_df
+```
+
+
+
+
+
+
+
+
+# -
+
+# Results for abstract
+
+```{r}
+treated_estimates_abstract <- models |>
+  imap_dfr(~ broom::tidy(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y)) |> 
+  slice(-(5:8))
+
+tr_ab <-
+bind_rows(
+  treated_estimates_abstract,
+  result_age_df,
+  results_sex
+) |>
+  mutate(
+    combined = glue::glue(
+      "{sprintf('%.2f', estimate)} ({sprintf('%.2f', conf.low)} - {sprintf('%.2f', conf.high)})"
+    )
+  )
+
+openxlsx::write.xlsx( 
+  tr_ab, here::here("..", "results", "other", "abstract_data.xlsx")
+  )
+```
+
+
+
+# plot estimates
+
+```{r}
+tr_ab |>
+  ggplot(aes(x = estimate, y = fct_reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  # Optionally add numeric labels (the “combined” column)
+  geom_text(aes(label = combined), hjust = -0.1, size = 3) +
+  facet_wrap(~ model, ncol = 1, scales = "free_y") +
+  theme_bw() +
+  labs(
+    x = "Hazard Ratio (HR)",
+    y = NULL,
+    title = "Forest Plot of Model Estimates"
+  ) +
+  coord_cartesian(clip = "off")  # Ensures labels be
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# -
+
+# Time varying covariates
+
+```{r}
+extract_fit_engine(models[["Model 7: M3 + Interaction with number of tests"]])
+
+fit_timevarying_tests <- 
+  fsr_spec %>%
+    fit(Surv(risk_time_art, risk_art_flag) ~ n_tests_within_5_fac + Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag, 
+           anc = list(
+      gamma1 = ~ n_tests_within_5_fac,
+      gamma2 = ~ n_tests_within_5_fac,
+      gamma3 = ~ n_tests_within_5_fac,
+      gamma4 = ~ n_tests_within_5_fac
+    ),
+    data = data_cvd
+    )
+
+data_cvd |> count(n_tests_within_5_fac)
+
+s_tests <- standsurv(
+  extract_fit_engine(fit_timevarying_tests),
+  t = c(0, 365, 730, 1095, 1460, 1825),
+  ci = TRUE,
+  at = list(
+    list(n_tests_within_5_fac = "Control"),
+    list(n_tests_within_5_fac = "HPA, 1 test"),
+    list(n_tests_within_5_fac = "HPA, 2 tests"),
+    list(n_tests_within_5_fac = "HPA, ≥3 tests")
+  ),
+  contrast = "difference"
+)
+
+attr(s_tests, "standpred_contrast")
+s_tests_long <- attr(s_tests, "standpred_at")
+s_tests_long |> print(n=100)
+
+s_tests_ratio <- standsurv(
+   extract_fit_engine(fit_timevarying_tests),
+  at = list(
+    list(n_tests_within_5_fac = "Control"),
+    list(n_tests_within_5_fac = "HPA, 1 test"),
+    list(n_tests_within_5_fac = "HPA, 2 tests"),
+    list(n_tests_within_5_fac = "HPA, ≥3 tests")
+  ),
+  t = c(365, 730, 1095, 1460, 1825),  # time points (e.g. 1 to 5 years)
+  ci = TRUE,
+  type = "hazard",
+  contrast = "ratio"  # gives the hazard ratio HPA/Control 
+)
+
+
+names(attributes(s_tests_ratio))
+attr(s_tests_ratio, "standpred_contrast")
+s_tests_long <- attr(s_tests_ratio, "standpred_at")
+attr(s_tests_ratio, "standpred_at")
+s_tests_long |> print(n=100)
+
+extract_fit_engine("Model 7: M3 + Interaction with number of tests")
+
+tidy(fit_timevarying_tests, exponentiate = TRUE,  transform = "coefs.exp")
+
+
+
+# Add an age group indicator: since the scenarios are ordered, you can create it manually.
+age_groups <- rep(c("25", "35", "45", "55", "65"), each = 2)
+s_age_long <- s_age_long %>% mutate(Age_Group = age_groups)
+
+# Plot the hazard ratios (contrast estimates) by age group
+ggplot(s_tests_long, aes(x = time, y = contrast, group = Age_Group)) +
+  geom_line(aes(color = Age_Group)) +
+  geom_ribbon(aes(ymin = contrast2_1_lci, ymax = contrast2_1_uci, fill = Age_Group), alpha = 0.2) +
+  labs(x = "Time (days)", 
+       y = "Hazard Ratio (HPA vs. Control)",
+       title = "Hazard Ratios by Age Group",
+       color = "Age Group", fill = "Age Group") +
+  theme_minimal()
+
+plot()
+
+plot(extract_fit_engine(fit_timevarying_tests), contrast=TRUE, ci=TRUE)
+
+plot(s_tests_ratio, contrast=TRUE, ci=TRUE)
+```
+
+
+## treated vs controls
+
+```{r}
+fit_timevarying_tests <- 
+  fsr_spec %>%
+    fit(Surv(risk_time_art, risk_art_flag) ~ n_tests_within_5_fac + Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag, 
+           anc = list(
+      gamma1 = ~ n_tests_within_5_fac,
+      gamma2 = ~ n_tests_within_5_fac,
+      gamma3 = ~ n_tests_within_5_fac,
+      gamma4 = ~ n_tests_within_5_fac
+    ),
+    data = data_cvd |> sample_n(150000)
+    )
+
+
+s_ratio <- standsurv(
+  object   = fit_agegroups_tv,
+  t        = c(182, 365, 547, 730, 912, 1095, 1277, 1460, 1642, 1825), 
+  at       = list(
+  list(treated = "Control"),
+  list(treated = "Control"),
+  list(treated = "Control"),
+  list(treated = "HPA"),
+  list(treated = "HPA"),
+  list(treated = "HPA")
+),
+  ci       = TRUE,      # confidence intervals
+  type     = "hazard",  # hazard scale
+  contrast = "ratio"    # each scenario / reference scenario
+)
+```
+
+
+## Age, 5 yr follow-up
+
+```{r}
+
+
+
+fit_agegroups_tv <- flexsurvspline(
+  formula = Surv(risk_time_art, risk_art_flag) ~ treated + age_group +
+    Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag,  # main formula
+  anc = list(
+    gamma1 = ~ age_group + treated,
+    gamma2 = ~ age_group + treated,
+    gamma3 = ~ age_group + treated
+  ),
+  data = data_cvd,
+  k = 2,            # 2 df for the time-spline
+  scale = "hazard"  # or "normal"/"odds", but "hazard" is typical for PH-like
+)
+
+
+s_ratio <- standsurv(
+  object   = fit_agegroups_tv,
+  t        = c(182, 365, 547, 730, 912, 1095, 1277, 1460, 1642, 1825), 
+  at       = list(
+  list(Age="<35", treated = "Control"),
+  list(Age="35–49", treated = "Control"),
+  list(Age=">49", treated = "Control"),
+  list(Age="<35", treated = "HPA"),
+  list(Age="35–49", treated = "HPA"),
+  list(Age=">49", treated = "HPA")
+),
+  ci       = TRUE,      # confidence intervals
+  type     = "hazard",  # hazard scale
+  contrast = "ratio"    # each scenario / reference scenario
+)
+
+s_surv_diff <- standsurv(
+  object   = fit_agegroups_tv,
+  t        = c(182, 365, 547, 730, 912, 1095, 1277, 1460, 1642, 1825), 
+  at       = list(
+    list(Age="<35", treated = "Control"),
+    list(Age="35–49", treated = "Control"),
+    list(Age=">49", treated = "Control"),
+    list(Age="<35", treated = "HPA"),
+    list(Age="35–49", treated = "HPA"),
+    list(Age=">49", treated = "HPA")
+  ),
+  ci       = TRUE,
+  type     = "survival",  # Get survival probabilities
+  contrast = "difference" # "HPA - Control" at each time
+)
+
+time_varying_effects <- 
+list(
+  fit_agegroups_tv,
+  s_ratio = s_ratio,
+  s_surv_diff = s_surv_diff
+)
+
+saveRDS(time_varying_effects, here::here("..", "results", "models",  "five_yr_time_varying_effects_M3.rds"))
+time_varying_effects <- readRDS(here::here("..", "results", "models",  "five_yr_time_varying_effects_M3.rds"))
+
+
+
+
+
+
+
+s_hratio_long
+
+
+s_ratio_long <- attr(s_ratio, "standpred_at")
+head(s_ratio_long)
+s_hratio_long <- attr(s_ratio, "standpred_contrast")
+
+s_surv_diff_long <- attr(s_surv_diff, "standpred_at")
+head(s_surv_diff_long)
+names(attributes(s_surv_diff))
+s_surv_difference <- attr(s_surv_diff, "standpred_contrast")
+
+s_ratio          <- time_varying_effects$s_ratio
+s_hratio_long |> print(n=100)
+
+hazard <- ggplot(s_ratio_long, aes(x=time, y=hazard, color=factor(at))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=hazard_lci, ymax=hazard_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard",
+    color="Age group", fill="Age group"
+  ) +
+  theme_bw()
+
+
+ratio <- ggplot(s_hratio_long, aes(x=time, y=ratio, color=factor(contrast))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=ratio_lci, ymax=ratio_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard ratio",
+    color="Age group", fill="Age group"
+  ) +
+  theme_bw()
+
+
+
+
+
+
+survival <- ggplot(s_surv_diff_long, aes(x=time, y=survival, color=factor(at))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=survival_lci, ymax=survival_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Survival probability",
+    color="Age group", fill="Age group"
+  ) +
+  theme_bw()
+
+survdiff <- ggplot(s_surv_difference, aes(x=time, y=difference, color=factor(contrast))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=difference_lci, ymax=difference_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="survival difference",
+    color="Age group", fill="Age group"
+  ) +
+  theme_bw()
+
+library(patchwork)
+hazard + ratio + survival + survdiff +
+  plot_layout(ncol = 1) +
+  plot_annotation(
+    title = "Hazard and Survival Ratios by Age Group",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+  )
+
+
+```
+
+# -
+# Unrestricted follow-up
+
+## HPA vs control
+```{r}
+
+fit_unrestricted <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ treated + Age +
+    Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group,  
+  anc = list(
+    gamma1 = ~ treated,
+    gamma2 = ~ treated,
+    gamma3 = ~ treated
+  ),
+  data = data_cvd,
+  k = 2,            # 2 df for the time-spline
+  scale = "hazard"  # or "normal"/"odds", but "hazard" is typical for PH-like
+)
+
+fit_unrestricted |> tidy(exponentiate = TRUE,  transform = "coefs.exp")
+
+
+s_unrestricted <- standsurv(
+  object   = fit_unrestricted,
+  t        = c(c(1, 182, 365, 547, 730, 1095, 1460, 1825), seq(2190, 10740, by = 365)), 
+  at       = list(
+    list(treated = "Control"),
+    list(treated = "HPA")
+  ),
+  ci       = TRUE,      # confidence intervals
+  type     = "hazard",  # hazard scale
+  contrast = "ratio"    # each scenario / reference scenario
+)
+
+S_unrestricted_diff_surv <- 
+standsurv(
+  object   = fit_unrestricted,
+  t        = c(c(1, 182, 365, 547, 730, 1095, 1460, 1825), seq(2190, 10740, by = 365)), 
+  at       = list(
+    list(treated = "Control"),
+    list(treated = "HPA")
+  ),
+  ci       = TRUE,
+  type     = "survival",  # Get survival probabilities
+  contrast = "difference" # "HPA - Control" at each time
+)
+
+
+
+time_varying_effects_unrestricted <- 
+list(
+  fit_unrestricted = fit_unrestricted,
+  s_unrestricted = s_unrestricted,
+  S_unrestricted_diff_surv = S_unrestricted_diff_surv
+)
+
+saveRDS(time_varying_effects_unrestricted, here::here("..", "results", "models",  "unrestricted_yr_time_varying_effects_M3_2knots.rds"))
+time_varying_effects_unrestricted <- readRDS(here::here("..", "results", "models",  "unrestricted_yr_time_varying_effects_M3_2knots.rds"))
+
+
+time_varying_effects$s_unrestricted
+
+
+names(attributes(time_varying_effects))
+
+s_ratio_long <- attr(s_unrestricted, "standpred_at")
+s_hratio_long <- attr(s_unrestricted, "standpred_contrast")
+
+s_surv_diff_long <- attr(S_unrestricted_diff_surv, "standpred_at")
+s_surv_difference <- attr(S_unrestricted_diff_surv, "standpred_contrast")
+
+
+
+hazard <- ggplot(s_ratio_long, aes(x=time, y=hazard, color=factor(at))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=hazard_lci, ymax=hazard_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+
+ratio <- ggplot(s_hratio_long, aes(x=time, y=ratio, color=factor(contrast))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=ratio_lci, ymax=ratio_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard ratio",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+
+
+
+
+
+survival <- ggplot(s_surv_diff_long, aes(x=time, y=survival, color=factor(at))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=survival_lci, ymax=survival_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Survival probability",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+survdiff <- ggplot(s_surv_difference, aes(x=time, y=difference, color=factor(contrast))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=difference_lci, ymax=difference_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="survival difference",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+library(patchwork)
+hazard + ratio + survival + survdiff +
+  plot_layout(ncol = 1) +
+  plot_annotation(
+    title = "",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+  )
+
+
+
+
+
+
+```
+
+## HPB 1,2,3 tests vs control
+```{r}
+
+fit_unrestricted <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ n_tests_within_5_fac + Age +
+    Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag,  # main formula
+  anc = list(
+    gamma1 = ~ n_tests_within_5_fac,
+    gamma2 = ~ n_tests_within_5_fac,
+    gamma3 = ~ n_tests_within_5_fac
+  ),
+  data = data_cvd,
+  k = 2,            # 2 df for the time-spline
+  scale = "hazard"  # or "normal"/"odds", but "hazard" is typical for PH-like
+)
+
+fit_unrestricted |> tidy(exponentiate = TRUE,  transform = "coefs.exp")
+
+
+s_unrestricted_hr_tests <- standsurv(
+  object   = fit_unrestricted,
+  t        = c(c(1, 182, 365, 547, 730, 1095, 1460, 1825), seq(2190, 10740, by = 365)), 
+  at       = list(
+    list(n_tests_within_5_fac = "Control"),
+    list(n_tests_within_5_fac = "HPA, 1 test"),
+    list(n_tests_within_5_fac = "HPA, 2 tests"),
+    list(n_tests_within_5_fac = "HPA, ≥3 tests")
+  ),
+  ci       = TRUE,      # confidence intervals
+  type     = "hazard",  # hazard scale
+  contrast = "ratio"    # each scenario / reference scenario
+)
+
+S_unrestricted_diff_surv_tests <- 
+standsurv(
+  object   = fit_unrestricted,
+  t        = c(c(1, 182, 365, 547, 730, 1095, 1460, 1825), seq(2190, 10740, by = 365)), 
+  at       = list(
+    list(n_tests_within_5_fac = "Control"),
+    list(n_tests_within_5_fac = "HPA, 1 test"),
+    list(n_tests_within_5_fac = "HPA, 2 tests"),
+    list(n_tests_within_5_fac = "HPA, ≥3 tests")
+  ),
+  ci       = TRUE,
+  type     = "survival",  # Get survival probabilities
+  contrast = "difference" # "HPA - Control" at each time
+)
+
+
+
+time_varying_effects_unrestricted <- 
+list(
+  fit_unrestricted = fit_unrestricted,
+  s_unrestricted_hr_tests = s_unrestricted_hr_tests,
+  S_unrestricted_diff_surv_tests = S_unrestricted_diff_surv_tests
+)
+
+saveRDS(time_varying_effects_unrestricted, here::here("..", "results", "models",  "unrestricted_yr_time_varying_effects_M3_2knots_number_of_tests.rds"))
+
+
+
+
+
+names(attributes(time_varying_effects_unrestricted))
+
+s_ratio_long <- attr(s_unrestricted_hr_tests, "standpred_at")
+s_hratio_long <- attr(s_unrestricted_hr_tests, "standpred_contrast")
+
+s_surv_diff_long <- attr(S_unrestricted_diff_surv_tests, "standpred_at")
+s_surv_difference <- attr(S_unrestricted_diff_surv_tests, "standpred_contrast")
+
+
+
+hazard <- ggplot(s_ratio_long, aes(x=time, y=hazard)) +
+  geom_line(aes(color=factor(at))) +
+  geom_ribbon(aes(ymin=hazard_lci, ymax=hazard_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+
+ratio <- ggplot(s_hratio_long |> filter(time != 1), aes(x=time, y=ratio )) +
+  geom_line(aes(color=factor(contrast))) +
+  geom_ribbon(aes(ymin=ratio_lci, ymax=ratio_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+ # xlim(2,11000) +
+  labs(
+    x="Follow-up time (days)",
+    y="Hazard ratio",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+
+
+
+
+
+survival <- ggplot(s_surv_diff_long, aes(x=time, y=survival)) +
+  geom_line(aes(color=factor(at))) +
+  geom_ribbon(aes(ymin=survival_lci, ymax=survival_uci, fill=factor(at)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="Survival probability",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+survdiff <- ggplot(s_surv_difference, aes(x=time, y=difference)) +
+ geom_line(aes(color=factor(contrast))) +
+  geom_ribbon(aes(ymin=difference_lci, ymax=difference_uci, fill=factor(contrast)), alpha=0.2) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    x="Follow-up time (days)",
+    y="survival difference",
+    color="", fill=""
+  ) +
+  theme_bw()
+
+library(patchwork)
+hazard + ratio + survival + survdiff +
+  plot_layout(ncol = 1) +
+  plot_annotation(
+    title = "",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+  )
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# _____________________________________________________________________________
+
+
+
+# cox new
+data
+```{r}
+data_occ  <- data_cvd |>                     
+  filter(!is.na(ssyk_WBHL_group)) |> 
+  group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> 
+  filter(n_cluster > 4) 
+
+data_mun  <- data_cvd |>                    
+  filter(!is.na(ssyk_WBHL_group),
+         !is.na(KommunSize),
+         !is.na(Place_of_origin)) |> 
+  group_by(id_cluster) |> 
+        mutate(n_cluster = n()) |> 
+        ungroup() |> 
+  filter(n_cluster > 4) 
+
+
+```
+
+```{r}
+fits_m <- list(
+
+  m1 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated + birth_cohort,
+             data = data_cvd),
+
+  m2 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag,
+             data = data_cvd),
+
+  m3 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd),
+
+  m4 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated + ssyk_WBHL_group + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_occ),
+
+  m5 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI + ssyk_WBHL_group +
+               KommunSize + Place_of_origin,
+             data = data_mun),
+
+  m6 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * Sex + birth_cohort + Age +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd),
+
+  m7 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * age_group + Sex + birth_cohort +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd),
+
+  m8 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * ssyk_WBHL_group + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_occ),
+
+  m9 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               n_tests_within_5_fac + Age + Sex +
+               birth_cohort + comorbidity +
+               cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+             data = data_cvd)     # dose model (no treated term)
+)
+```
+
+## get estimates for the main models (M1–M5) and interactions (M6–M8)
+```{r}
+# ───────────────────────────────────────────────────────────────────────────────
+# helper that works for by_var = NULL (main models) or a grouping variable    |
+# ───────────────────────────────────────────────────────────────────────────────
+get_hr <- function(fit, model_id, by_var = NULL) {
+  
+  # 1) get the avg hazard ratio row
+  hr <- avg_comparisons(
+    fit,
+    variables = "treated",
+    by        = by_var,      # NULL → one row, change to TRUE for main model estimates
+    type      = "lp",
+    transform = "exp"
+  ) |>
+    as_tibble() |>           # collapse comparisons object to tibble
+    mutate(model = model_id, .before = 1)
+  
+  # 2) extract the exact analysis data
+  mf     <- model.frame(fit)
+  status <- mf[[1]][, "status"]
+  dat    <- mf |>
+    mutate(
+      event = status,
+      arm   = if_else(treated %in% c(1, "HPA"), "HPA", "Control")
+    )
+  
+  # 3) count by (by_var + arm) or by arm alone
+  grp_vars <- if (is.null(by_var)) "arm" else c(by_var, "arm")
+  
+  counts <- dat |>
+    group_by(across(all_of(grp_vars))) |>
+    summarise(
+      n      = n(),
+      events = sum(event),
+      .groups = "drop"
+    ) |>
+    pivot_wider(
+      names_from  = arm,
+      values_from = c(n, events),
+      names_glue  = "{.value}_{arm}"
+    )
+  
+  # 4) merge: for by_var = NULL, we know hr has exactly one row → use bind_cols()
+  if (is.null(by_var)) {
+    bind_cols(hr, counts)
+  } else {
+    left_join(hr, counts, by = by_var)
+  }
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# build the main‐effects table (M1–M5), now with n_Control, events_Control, etc. |
+# ───────────────────────────────────────────────────────────────────────────────
+tbl_main <- imap_dfr(
+  fits_m[1:5],          # M1–M5
+  \(fit, nm) get_hr(fit, nm)
+)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# build the interaction tables (M6–M8)                                          |
+# ───────────────────────────────────────────────────────────────────────────────
+tbl_int <- bind_rows(
+  get_hr(fits_m$m6, "M6", by_var = "Sex"),
+  get_hr(fits_m$m7, "M7", by_var = "age_group"),
+  get_hr(fits_m$m8, "M8", by_var = "ssyk_WBHL_group")
+)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# finally, stack them                                                           |
+# ───────────────────────────────────────────────────────────────────────────────
+hr_combined <- bind_rows(tbl_main, tbl_int) |>
+  select(
+    model,
+    n_Control, events_Control,
+    n_HPA,     events_HPA,
+    term, contrast,
+    estimate, conf.low, conf.high, p.value
+  )
+
+print(hr_combined, n = nrow(hr_combined))
+
+```
+
+```{r}
+library(dplyr)
+
+# 1) massage the M-series results (hr_tbl) to match the exposure table
+#    – we’ll treat each M model name as the “exposure” and have groups = "All"
+hr_main <- hr_tbl |>
+  as_tibble() |>
+  mutate(
+    exposure = model,       # M1, M2, …, M8
+    groups   = "All"        # no strata for main-effects
+  ) |>
+  select(
+    exposure, groups,
+    n_Control, n_HPA,
+    events_Control, events_HPA,
+    term, contrast,
+    estimate, conf.low, conf.high, p.value
+  )
+
+# 2) take your exposures loop results, which you already called hr_tbl_all_df
+#    and which already has exposure, groups, etc.
+hr_exp <- hr_tbl_all_df
+
+# 3) stack them
+hr_combined <- bind_rows(hr_main, hr_exp)
+
+# 4) inspect
+print(hr_combined, n = nrow(hr_combined))
+```
+# _____________________________________________________________________________
+# COX
+
+
+
+```{r}
+cox_spec <- 
+    proportional_hazards() %>%
+    set_engine("survival") %>% 
+    set_mode("censored regression") 
+```
+
+
+
+
+```{r}
+## Cox Model Specification
+# The Cox model does not require specifying a distribution.
+
+
+## Models
+
+# Initialize an empty list for the Cox models
+models_cox <- list()
+
+# Model 1: Treated only + birth cohort
+models_cox[["Model 1: Treated only + birth cohort"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 1: ", e)
+  NULL
+})
+
+# Model 2: + Age, Sex, Comorbidity & CVD before event
+models_cox[["Model 2: + Age, Sex, Comorbidity & CVD before event"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 2: ", e)
+  NULL
+})
+
+# Model 3: + Income & Occupation
+models_cox[["Model 3: + Income & Occupation"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity +
+          cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 3: ", e)
+  NULL
+})
+
+# Model 4: + Kommun size & Place_of_origin
+#   - Drop NAs in KommunSize and Place_of_origin.
+#   - Filter to include only clusters with > 4 observations.
+models_cox[["Model 4: + Kommun size & Place_of_origin"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity +
+          cvd_art_before_HPA_flag + KommunSize + Place_of_origin,
+        data = data_cvd %>% 
+          drop_na(KommunSize, Place_of_origin) %>% 
+          group_by(id_cluster) %>% 
+          mutate(n_cluster = n()) %>% 
+          ungroup() %>% 
+          filter(n_cluster > 4))
+}, error = function(e) {
+  message("Error in Model 4: ", e)
+  NULL
+})
+
+# Model 5: M3 + Interaction with Sex
+models_cox[["Model 5: M3 + Interaction with sex"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated * Sex + birth_cohort + Age + comorbidity +
+          cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 5: ", e)
+  NULL
+})
+
+# Model 6: M3 + Interaction with Age
+models_cox[["Model 6: M3 + Interaction with age"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated * Age + Sex + birth_cohort + comorbidity +
+          cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 6: ", e)
+  NULL
+})
+
+# Model 7: M3 + Interaction with number of tests
+models_cox[["Model 7: M3 + number of tests"]] <- tryCatch({
+  cox_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ n_tests_within_5_fac + Age + Sex + birth_cohort +
+          comorbidity + cvd_art_before_HPA_flag,
+        data = data_cvd)
+}, error = function(e) {
+  message("Error in Model 7: ", e)
+  NULL
+})
+
+# Inspect the fitted Cox models
+models_cox
+
+
+saveRDS(models_cox, here::here("..", "results", "models", "cox_models.rds"))
+
+ models |>
+  imap_dfr(~ broom::glance(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+ 
+treated_estimates_cox <- models_cox |>
+  imap_dfr(~ broom::tidy(.x, conf.int = TRUE, exponentiate=TRUE) |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+
+```
+
+
+
+
+
+# #######################
+# OLDer stuff
+
+
+```{r}
+library(dplyr)
+library(survival)
+library(flexsurv)
+
+# 1. Filter data
+# define the model specification with a Weibull distribution
+flexsurv_spec <- survival_reg(dist = "weibull") %>%
+  set_engine("flexsurv") %>%
+  set_mode("censored regression")
+
+# define the survival formula
+# here we assume that risk_art_flag is the event indicator: 1 = event, 0 = censored
+surv_formula <- Surv(risk_time_art, risk_art_flag) ~ treated + strata(Year) + comorbidity + IncomeLevel
+
+# set up a workflow
+flexsurv_workflow <- workflow() %>%
+  add_model(flexsurv_spec) %>%
+  add_formula(surv_formula)
+
+# fit the model; replace 'your_data' with the name of your dataset
+flexsurv_fit <- flexsurv_workflow %>% 
+  fit(data = data_cvd)
+
+# inspect the fitted model
+print(flexsurv_fit)
+
+# 3. Summarize model
+summary(fps_model)
+
+# 4. Plot baseline survival/hazard
+plot(fps_model, type = "survival", ci = TRUE)
+plot(fps_model, type = "hazard", ci = TRUE)
+```
+
+
+# Proportional hazards model
+
+```{r}
+
+
+library(parsnip)
+library(broom)
+library(purrr)
+library(dplyr)
+library(ggplot2)
+
+# Define your model specification
+ph_spec <- 
+  proportional_hazards() |> 
+  set_engine("survival") |>  
+  set_mode("censored regression")
+
+# Fit multiple models with increasing complexity
+models <- list(
+  "Model 1: Treated only" = ph_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated, data = data_cvd),
+  
+    "Model 2: + Comorbidity & cvd_broad_before_HPA_flag" = ph_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + Sex + Age + comorbidity + cvd_broad_before_HPA_flag, 
+        data = data_cvd),
+  
+  "Model 3: + Comorbidity & cvd_broad_before_HPA_flag" = ph_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated  + Sex + Age + comorbidity + cvd_broad_before_HPA_flag, 
+        data = data_cvd),
+  
+  "Model 4: + IncomeLevel_CSFVI & Place_of_origin" = ph_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated  + Sex + Age + comorbidity + cvd_broad_before_HPA_flag +
+          IncomeLevel_CSFVI + Place_of_origin, data = data_cvd)
+)
+
+# Tidy each model's output, filter for the treated term, and combine them
+treated_estimates <- models |>
+  imap_dfr(~ broom::tidy(.x, exponentiate = TRUE, conf.int = TRUE) |> 
+             filter(grepl("treated", term)) |> 
+             mutate(model = .y))
+
+# View the combined estimates
+treated_estimates
+
+treated_estimates |> 
+  mutate(
+    model = factor(model, levels = c("Model 1: Treated only", 
+                                      "Model 2: + Comorbidity & cvd_broad_before_HPA_flag",
+                                      "Model 3: + IncomeLevel_CSFVI & Place_of_origin")),
+   model = fct_rev(model)
+  ) |>
+ggplot(aes(y = model, x = estimate, xmin = conf.low, xmax = conf.high)) +
+  geom_pointrange() +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+ # coord_flip() +
+  labs(
+    y = "",
+    x = "Hazard ratio [95% CI]",
+    title = "Comparison of HPAs vs controls"
+  ) +
+  theme_minimal()
+
+# The holdout data can be predicted for survival probability at different time points as well as the linear predictor and event time.
+
+x <- ph_fit |>
+  predict(
+    df_sample, 
+    type = "survival",
+    eval_time = c(100, 500, 1000)
+  ) %>% 
+    slice(1) %>% 
+    tidyr::unnest(col = .pred)
+  
+  
+  predict(ph_fit, df_sample, type = "linear_pred")  
+  
+  
+    predict(ph_fit, df_sample, type = "time")
+```
+
+
+# Flexible parametric model with splines
+
+```{r}
+
+  fsr_spec <- 
+    survival_reg(dist = "lognormal") %>%
+    set_engine("flexsurvspline", k = 2) %>% 
+    set_mode("censored regression") 
+
+
+
+# Fit multiple models with increasing complexity
+tictoc::tic()
+models <- list(
+  "Model 1: Treated only" = fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort, data = data_cvd),
+  
+    "Model 2: + Age, Sex, Comorbidity & CVD before event" = fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag, 
+        data = data_cvd),
+  
+  "Model 3: + Income & Occupation" = fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated  + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI + ssyk_WBHL_group, 
+        data = data_cvd),
+  
+  "Model 4: + Komun size & Place_of_origin" = fsr_spec %>% 
+    fit(Surv(risk_time_art, risk_art_flag) ~ treated  + birth_cohort +  Age + Sex + comorbidity + cvd_art_before_HPA_flag + KommunSize + Place_of_origin , data = data_cvd |> drop_na(KommunSize, Place_of_origin)),
+  
+  "Model 5: M3 + Interaction with sex" = fsr_spec %>%
+  fit(
+    Surv(risk_time_art, risk_art_flag) ~ treated * Sex + birth_cohort  + Age + comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  ),
+  
+   "Model 6: M3 + Interaction with age" = fsr_spec %>%
+  fit(
+    Surv(risk_time_art, risk_art_flag) ~ treated * Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  ),
+  
+     "Model 7: M3 + Interaction with number of tests" = fsr_spec %>%
+  fit(
+    Surv(risk_time_art, risk_art_flag) ~ n_tests_within_5_fac + Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  )
+)
+tictoc::toc()
+
+data_cvd |> count(n_tests_within_5_fac)
+
+
+
+
+data_cvd |>  glimpse()
+
+
+model5 <- models[["Model 5: Interaction with sex"]]
+
+broom::tidy(model5, conf.int = TRUE, transform = "coefs.exp")
+
+
+data_cvd %>%
+  summarise(
+    across(c(treated, birth_cohort, Age, Sex, comorbidity, cvd_art_before_HPA_flag,
+             IncomeLevel_CSFVI, ssyk_WBHL_group, KommunSize, Place_of_origin, n_tests_within_5_fac),
+           ~ sum(is.na(.)))
+  )
+
+table(data_cvd$Sex, useNA = "ifany")
+table(data_cvd$n_tests_within_5_fac, useNA = "ifany")
+
+```
+
+
+
+
+## 
+
+```{r}
+
+hr <- hr_flexsurvreg(extract_fit_engine(fsr_fit), newdata = data_cvd |> distinct())
+hr
+
+p1 <- plot(extract_fit_engine(fsr_fit), type = "cumhaz")
+p1
+
+
+## Calculate standardized survival and the difference in standardized survival
+## for the two levels of treated across a grid of survival times  
+s <- standsurv(extract_fit_engine(fsr_fit), 
+               #type = "hazard", 
+               t = c(0, 365, 730, 1095, 1460, 1825),
+               ci = TRUE,
+               at = list(list(treated="HPA"), 
+                         list(treated="Control"),
+                         list(comorbidity="=>3"),
+                         list(comorbidity="0")),
+               contrast = "difference"
+               )
+
+s |> print(n=200)
+
+plot(s, ci =TRUE)
+
+
+names(attributes(s))
+attr(s, "standpred_contrast") #standsruv_contrast
+attr(s, "standpred_at") #standsruv_contrast
+
+## Calculate hazard of standardized survival and the marginal hazard ratio
+## for the two levels of treated across a grid of survival times
+## 10 bootstraps for confidence intervals (this should be larger)
+haz <- standsurv(extract_fit_engine(fsr_fit), 
+                         at = list(list(treated="HPA"), 
+                         list(treated="Control")),
+                                           #t=seq(0,7, length.out=100),
+                         t = c(365, 730, 1095, 1460, 1825),
+                         type="hazard",
+                         contrast = "ratio", 
+                         boot = TRUE,
+                         B=10, 
+                         ci=TRUE)
+
+plot(haz, ci=TRUE)
+
+plot(haz, contrast=TRUE, ci=TRUE)
+
+
+s_age <- standsurv(
+  extract_fit_engine(models[["Model 6: M3 + Interaction with age"]]),
+  t = c(0, 365, 730, 1095, 1460, 1825),
+  ci = TRUE,
+  at = list(
+    list(treated = "HPA", Age = 50),
+    list(treated = "Control", Age = 50),
+    list(treated = "HPA", Age = 70),
+    list(treated = "Control", Age = 70)
+  ),
+  contrast = "difference"
+)
+
+
+
+```
+
+
+
+
+```{r}
+df_sample |> count(Sex)
+# 1) Define the time points you want to predict
+time_range <- seq(0, 365*3, by = 30)  # from 0 to 3 years, in monthly steps
+
+# 2) Create a data frame with all combinations of interest
+#    Suppose your sex variable is coded as "Male"/"Female"
+new_data_base <- expand_grid(
+  treated = c(0, 1),
+  Sex = c("Female", "Male"),
+  comorbidity = 0,
+  cvd_art_before_HPA_flag = 0,
+  KommunSize = "Small",
+  Place_of_origin = "Sweden"
+)
+
+new_data <- new_data_base |>
+  slice(rep(seq_len(nrow(new_data_base)), each = length(time_range))) |>
+  mutate(time = rep(time_range, times = nrow(new_data_base)))
+
+# Extract the underlying flexsurv model:
+engine_fit5 <- extract_fit_engine(model5)
+
+# Then use flexsurv's summary() method:
+# - "newdata" is the same but without a 'time' column
+# - times is given as an argument
+# - type = "survival" or "cumhaz"
+
+df_plot <- new_data |>
+  group_by(treated, Sex, comorbidity, cvd_art_before_HPA_flag, KommunSize, Place_of_origin) |>
+  group_modify(~ {
+    # .x is a subset of new_data for a single group
+    # Distill the single row (or some rep) to pass to flexsurv
+    row_for_flexsurv <- .x[1, !colnames(.x) %in% "time"] |> ungroup()
+    times_vec <- .x$time
+    
+    # flexsurv summary
+    s <- summary(
+      engine_fit5,
+      newdata = row_for_flexsurv,
+      type = "survival",
+      times = times_vec
+    )[[1]]  # summary returns a list
+    out <- tibble(
+      time = s$time,
+      .pred_surv = s$est
+    )
+  }) |>
+  ungroup()
+```
+
+
+
+## contrasts
+```{r}
+newdata_grid <- tidyr::expand_grid(
+  treated = c(0,1),
+  Sex = c("Female","Male"),
+  # or keep age fixed for now, or specify multiple age values
+  Age = c(30, 60)
+)
+
+# With your fitted model:
+preds <- predict(
+  models[[5]], 
+  new_data = newdata_grid, 
+  type = "survival",    # or "linear_pred", "time_to_event" 
+  time = c(100, 200, 300) 
+)
+
+preds
+```
+
+
+
+# Accelerated Failure Time (AFT) Model
+```{r}
+library(parsnip)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(flexsurv)
+
+# Example: create a survival_reg specification using a Weibull model
+aft_spec <- 
+  survival_reg(dist = "lognormal") %>% 
+  set_engine("flexsurv") %>% 
+  set_mode("censored regression")
+
+# Fit the model using your data (df_sample should include your time and event variables)
+aft_fit <- 
+  aft_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ treated + comorbidity + IncomeLevel_CSFVI, 
+      data = data_cvd)
+
+aft_fit
+
+str(preds)
+
+# Then tidy the model output
+broom::tidy(aft_fit, exponentiate = TRUE)
+
+# 1. Predict median survival time (the 50th quantile) for each observation:
+median_surv <- aft_fit |>
+  predict(new_data = data_cvd, type = "quantile", quantile = 0.5)
+
+# 2. Predict survival probabilities at specific time points (e.g., 100, 500, 1000)
+#    Here we get the survival probability at these evaluation times for each individual.
+surv_probs <- aft_fit |>
+  predict(new_data = df_sample, type = "survival", eval_time = c(100, 500, 1000)) |>
+  tidyr::unnest(col = .pred)
+
+# 3. Calculate the absolute risk (i.e., probability of event) at these time points:
+#    Since survival probability is the chance of NOT having the event, absolute risk is 1 - survival.
+abs_risk <- surv_probs |>
+  mutate(absolute_risk = 1 - .pred)
+
+# View results:
+median_surv
+surv_probs
+abs_risk
+```
+
+# ###################
+# ###################
+# ###################
+
+# comparison cox and aft
+
+```{r}
+aft_spec <- 
+  survival_reg(dist = "lognormal") %>% 
+  set_engine("flexsurv") %>% 
+  set_mode("censored regression")
+
+ph_spec <- 
+  proportional_hazards() |> 
+  set_engine("survival") |>  
+  set_mode("censored regression")
+
+
+# Fit the model using your data (df_sample should include your time and event variables)
+aft_fit_1 <- 
+  aft_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ treated,
+      data = data_cvd)
+
+ph_fit_1 <- 
+  ph_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ treated,
+      data = data_cvd)
+
+
+ph_fit_1
+aft_fit_1
+
+# flexsurvspline(..., k = number_of_knots) with a single coefficient for each covariate (no time-varying interaction) will yield a hazard ratio that is effectively constant over time, just as in a Cox PH model. This is the standard approach if you do not suspect non-proportional hazards.
+  fsr_spec <- 
+    survival_reg(dist = "lognormal") %>%
+    set_engine("flexsurvspline") %>% 
+    set_mode("censored regression") 
+  sr_spec
+  
+fsr_fit_1 <- 
+  fsr_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ treated,
+      data = data_cvd)
+
+
+
+
+
+tidy(extract_fit_engine(fsr_fit_1), conf.int = TRUE, transform = "coefs.exp")
+
+summary(extract_fit_engine(fsr_fit_1))
+
+```
+
+How to get the estimates
+	1.	Hazard ratios:
+	•	Check the model coefficients using summary(model). If the distribution supports proportional hazards (Weibull, Gompertz, or the spline model with PH structure), you’ll see log hazard ratio estimates for each covariate.
+	2.	Absolute survival:
+	•	For all three functions, you typically use summary(model, newdata = ..., type = "survival", times = c(...)) or the top-level predict() function if applicable.
+	•	This returns survival probabilities (and CIs) at specified time points for a given covariate pattern.
+	
+	
+		1.	Use flexsurvreg() (standard parametric) if you:
+	•	Have a known or well-justified parametric form (e.g., Weibull).
+	•	Want simpler interpretation or a direct parametric approach and your data do not need flexible hazard shapes.
+	2.	Use flexsurvspline() (flexible parametric) if you:
+	•	Suspect non-standard or complex hazard shapes (e.g., hazards that rise then fall, or have multiple peaks).
+	•	Want to allow non-proportional hazards by including spline-based interactions with time.
+	•	Need easy derivation of absolute risk, time-dependent hazard ratios, or restricted mean survival.
+	
+	https://dominicmagirr.github.io/post/landmark-milestone-analysis-under-a-royston-parmar-flexible-survival-model-using-the-r-package-flexsurv/
+	
+	https://diagnprognres.biomedcentral.com/articles/10.1186/s41512-018-0026-5
+	
+	https://www.nature.com/articles/s41366-023-01314-4
+	
+	
+# testing ground
+	
+```{r}
+  fsr_spec <- 
+    survival_reg(dist = "lognormal") %>%
+    set_engine("flexsurvspline", k = 2) %>% 
+    set_mode("censored regression") 
+
+# Fit the model using 
+set.seed(1233334)
+fsr_fit <- 
+  fsr_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ n_tests_within_5_fac + Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag, 
+      data = data_cvd |> sample_n(100000))
+
+set.seed(1233334)
+fit_age <- 
+  fsr_spec %>% 
+  fit(Surv(risk_time_art, risk_art_flag) ~ treated * Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag, 
+      data = data_cvd |> sample_n(100000))
+
+# Create a set of scenarios for selected ages:
+s_age <- standsurv(
+  object = extract_fit_engine(fit_age),
+  at = list(
+    list(Age = 25, treated = "Control"),
+    list(Age = 25, treated = "HPA"),
+    list(Age = 35, treated = "Control"),
+    list(Age = 35, treated = "HPA"),
+    list(Age = 45, treated = "Control"),
+    list(Age = 45, treated = "HPA"),
+    list(Age = 55, treated = "Control"),
+    list(Age = 55, treated = "HPA"),
+    list(Age = 65, treated = "Control"),
+    list(Age = 65, treated = "HPA")
+  ),
+  t = c(365, 730, 1095, 1460, 1825),
+  ci = TRUE,
+  type = "hazard",
+  contrast = "ratio"
+)
+
+print(s_age)
+
+
+names(attributes(s_age))
+# For clarity, you might want to extract the estimates for each age group.
+# The contrast columns (e.g. contrast2_1, contrast4_3, etc.) compare each treated vs. control pair.
+# For example, rows 1 and 2 represent Age = 25 (with contrast in column contrast2_1),
+# rows 3 and 4 for Age = 35 (contrast4_3), and so on.
+
+# If you want to work with these results further, you can extract the long-format data.
+attr(s_age, "standpred_contrast")
+s_age_long <- attr(s_age, "standpred_at")
+s_age_long
+# Add an age group indicator: since the scenarios are ordered, you can create it manually.
+age_groups <- rep(c("25", "35", "45", "55", "65"), each = 2)
+s_age_long <- s_age_long %>% mutate(Age_Group = age_groups)
+
+# Plot the hazard ratios (contrast estimates) by age group
+ggplot(s_age_long, aes(x = time, y = contrast, group = Age_Group)) +
+  geom_line(aes(color = Age_Group)) +
+  geom_ribbon(aes(ymin = contrast2_1_lci, ymax = contrast2_1_uci, fill = Age_Group), alpha = 0.2) +
+  labs(x = "Time (days)", 
+       y = "Hazard Ratio (HPA vs. Control)",
+       title = "Hazard Ratios by Age Group",
+       color = "Age Group", fill = "Age Group") +
+  theme_minimal()
+
+
+
+
+
+
+
+s_sex_women <- standsurv(
+  object = extract_fit_engine(fit_sex),
+  at = list(
+    list(Sex = "Women", treated = "Control"),
+    list(Sex = "Women", treated = "HPA")
+  ),
+  t = c(365, 730, 1095, 1460, 1825),  # time points (e.g. 1 to 5 years)
+  ci = TRUE,
+  type = "hazard",
+  contrast = "ratio"  # gives the hazard ratio HPA/Control for women
+)
+
+library(marginaleffects)
+slopes_df <- marginaleffects::avg_slopes(
+extract_fit_engine(fsr_fit), newdata = data_cvd |> select(treated, Age, Sex, birth_cohort, comorbidity, cvd_art_before_HPA_flag))
+```
+
+
+# Age 
+
+```{r}
+# Assuming your fitted flexsurv model with treated*Age interaction is fit_age.
+coefs_age <- coef(extract_fit_engine(fit_age))
+vcov_age <- vcov(extract_fit_engine(fit_age))
+
+# Define the ages at which to compute the effect:
+ages <- c(25, 35, 45, 55, 65)
+
+# Compute HRs for each age:
+result_age <- sapply(ages, function(A) {
+  beta_effect <- coefs_age["treatedHPA"] + coefs_age["treatedHPA:Age"] * A
+  var_effect <- vcov_age["treatedHPA", "treatedHPA"] +
+                A^2 * vcov_age["treatedHPA:Age", "treatedHPA:Age"] +
+                2 * A * vcov_age["treatedHPA", "treatedHPA:Age"]
+  se_effect <- sqrt(var_effect)
+  HR <- exp(beta_effect)
+  HR_LCI <- exp(beta_effect - 1.96 * se_effect)
+  HR_UCI <- exp(beta_effect + 1.96 * se_effect)
+  c(HR = HR, LCI = HR_LCI, UCI = HR_UCI)
+})
+
+# Organize the results in a data frame:
+result_age_df <- data.frame(
+  Age = ages,
+  t(result_age)  # transpose to get rows by age
+)
+print(result_age_df)
+```
+
+
+# Sex 
+
+```{r}
+
+
+
+
+
+tidy(fit_age, exponentiate = TRUE,  transform = "coefs.exp")
+
+
+tidy(fit_sex, conf.int = TRUE, transform = "coefs.exp")
+
+# For Women: get the hazard (at a single time point) for Control vs. HPA
+s_women <- standsurv(
+  object = extract_fit_engine(fit_sex),
+  at = list(
+    list(Sex = "Women", treated = "Control"),
+    list(Sex = "Women", treated = "HPA")
+  ),
+  t = 1825,             # Choose t = 1825 days (5 years)
+  ci = TRUE,
+  type = "hazard",
+  contrast = "ratio"    # Contrast returns the hazard ratio: (HPA / Control)
+)
+
+# For Men: get the hazard (at the same time point) for Control vs. HPA
+s_men <- standsurv(
+  object = extract_fit_engine(fit_sex),
+  at = list(
+    list(Sex = "Men", treated = "Control"),
+    list(Sex = "Men", treated = "HPA")
+  ),
+  t = 1825, 
+  ci = TRUE,
+  type = "hazard",
+  contrast = "ratio"
+)
+
+```
+
+
+further can you provide examples of these "Would you like to see code examples for obtaining these subgroup estimates using standsurv " and "marginaleffects"? 

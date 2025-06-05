@@ -1,0 +1,94 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+hpa <- 
+  read_csv(here::here("..", "..","..", "..",  "HPI (DNR XXXXXX)", "Data HPI registeruttag 2023", "HPI", "HPI clean", "EEB_hpb_clean_2023-10-16.csv")) %>%
+ filter(
+   rowSums(!is.na(select(., EkB_rel_VO2, Astrand_rel_VO2, HeightCM, WeightKG, BloodPressureSystolic, BloodPressureDiastolic))) >= 2,
+   rowSums(!is.na(select(., ExerciseAnswer, TobaccoSmoking, Diet, Health, StressOverall, SymptomBackNeck))) >= 2 ) 
+
+# get time in study, be sure to change if time in study changes
+hpa_risk_time <-
+  read_csv(here::here("..", "data", "df_paper_3_CVD_2025-03-05.csv")) |> 
+  select(LopNr, risk_time_art, Performed, censor_date, treated) |> 
+  filter(treated == "1") 
+
+
+# data from earlier paper with number of tests that each participant have performed
+# hpi_first_last <- read_csv(here::here("data", "paper2_riskdataset_first_last_20240618.csv")) 
+
+
+
+```
+
+```{r}
+# countin how many tests each LopNr has
+df_time_test_count <-
+hpa_risk_time |> left_join(hpa |> select(!Performed), by = join_by(LopNr)) |> 
+group_by(LopNr) |>
+  arrange(Performed) |>
+  mutate(
+    first_test_date = min(Performed, na.rm = TRUE),
+    within_5 = if_else(Performed <= first_test_date + days(1826), 1, 0),
+    within_10 = if_else(Performed <= first_test_date + days(3653), 1, 0),
+  ) |>
+  mutate(
+    n_tests_total = n(),
+    n_tests_within_5 = sum(within_5, na.rm = TRUE),
+    n_tests_within_10 = sum(within_10, na.rm = TRUE),
+    # compute the mean interval using lag for tests in days
+#    mean_time_between_tests = if_else(n_tests_total > 1,
+#                                mean(as.numeric(Performed - lag(Performed)), na.rm = TRUE),
+ #                               0),
+    # composite score: here defined as tests within 5 years divided by risk_time_art (if risk_time_art > 0)
+    composite_score_within_5 = if_else(risk_time_art > 0,
+                              n_tests_within_5 / risk_time_art,
+                              NA_real_),
+    # composite score: here defined as tests within 10 years divided by risk_time_art (if risk_time_art > 0)
+    composite_score_within_10 = if_else(risk_time_art > 0,
+                              n_tests_within_10 / risk_time_art,
+                              NA_real_),
+        composite_score_total = if_else(risk_time_art > 0,
+                              n_tests_total / risk_time_art,
+                              NA_real_)
+  ) |>
+  ungroup() |>
+  select(LopNr, within_5, n_tests_total, n_tests_within_5, n_tests_within_10, composite_score_within_5, composite_score_within_10, composite_score_total) |> 
+  distinct(LopNr, .keep_all = TRUE)
+
+
+```
+
+# life-style variables
+## and join with number of HPAs
+```{r}
+
+df_lifestyle_n_hpa <-
+hpa_risk_time |> 
+  left_join(
+hpa |> select(LopNr, Performed, ExerciseAnswer, TobaccoSmoking, Health, StressOverall, Astrand_rel_VO2, BMI),
+by = join_by(LopNr, Performed)
+) |> 
+  left_join(
+    df_time_test_count,
+    by = join_by(LopNr)
+  ) |> 
+    distinct(LopNr, .keep_all = TRUE) 
+
+
+
+```
+
+# save
+
+```{r}
+write_csv(df_lifestyle_n_hpa, here::here("..", "data", "df_n_tests_CVD_2025-03-05.csv"))
+```
+

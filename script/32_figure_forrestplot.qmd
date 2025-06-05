@@ -1,0 +1,1230 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(scales)
+```
+
+```{r}
+# 5 yr
+#models <- readRDS(here::here("..", "results", "models", "FPS_models.rds"))
+# 10 yr
+models <- readRDS(here::here("..", "results", "models", "FPS_10yr_models.rds"))
+
+names(models)
+
+models[["M5: + Municipality & Place_of_origin"]]  <- NULL
+models[["M8: M3 x occupation"]]                   <- NULL
+models[["M9: Number of HPAs + covariates in M3"]] <- NULL
+models[["M7: M3 x age"]] <- NULL
+
+ models |>
+  imap_dfr(~ broom::glance(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+ 
+treated_estimates_cox <- models_cox |>
+  imap_dfr(~ broom::tidy(.x, conf.int = TRUE, exponentiate=TRUE) |> 
+            #filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y))
+
+
+
+```
+
+
+## sex
+```{r}
+
+# Extract coefficients and variance-covariance matrix from the fitted model:
+coefs <- coef(models[["M6: M3 x sex"]])
+vcov_mat <- vcov(models[["M6: M3 x sex"]])
+
+# For men (reference level)
+log_hr_men <- coefs["treatedHPA"]
+se_men <- sqrt(vcov_mat["treatedHPA", "treatedHPA"])
+
+# For women (combine main effect and interaction)
+log_hr_women <- coefs["treatedHPA"] + coefs["treatedHPA:SexWomen"]
+var_women <- vcov_mat["treatedHPA", "treatedHPA"] +
+             vcov_mat["treatedHPA:SexWomen", "treatedHPA:SexWomen"] +
+             2 * vcov_mat["treatedHPA", "treatedHPA:SexWomen"]
+se_women <- sqrt(var_women)
+
+# Calculate hazard ratios and 95% CIs
+results_sex <- tibble(
+  term = c("HPA_Men", "HPA_Women"),
+  estimate = c(exp(log_hr_men), exp(log_hr_women)),
+  conf.low = c(exp(log_hr_men - 1.96 * se_men), exp(log_hr_women - 1.96 * se_women)),
+  conf.high = c(exp(log_hr_men + 1.96 * se_men), exp(log_hr_women + 1.96 * se_women)),
+  model = "M3 + Interaction with sex"
+)
+results_sex
+```
+
+
+## Age
+```{r}
+# Assuming your fitted flexsurv model with treated*Age interaction is fit_age.
+# coefs_age <- coef(models[["M7: M3 x age"]])
+# vcov_age <- vcov(models[["M7: M3 x age"]])
+# 
+# # Define the ages at which to compute the effect:
+# ages <- c(25, 35, 45, 55, 65)
+# 
+# # Compute HRs for each age:
+# result_age <- sapply(ages, function(A) {
+#   beta_effect <- coefs_age["treatedHPA"] + coefs_age["treatedHPA:Age"] * A
+#   var_effect <- vcov_age["treatedHPA", "treatedHPA"] +
+#                 A^2 * vcov_age["treatedHPA:Age", "treatedHPA:Age"] +
+#                 2 * A * vcov_age["treatedHPA", "treatedHPA:Age"]
+#   se_effect <- sqrt(var_effect)
+#   HR <- exp(beta_effect)
+#   HR_LCI <- exp(beta_effect - 1.96 * se_effect)
+#   HR_UCI <- exp(beta_effect + 1.96 * se_effect)
+#   c(HR = HR, LCI = HR_LCI, UCI = HR_UCI)
+# })
+# 
+# # Organize the results in a data frame:
+# result_age_df <- data.frame(
+#   term = glue::glue("Age", " {ages}"),
+#   estimate = result_age[1, ],
+#   #t(result_age), # transpose to get rows by age
+#   conf.low = result_age[2, ],
+#   conf.high = result_age[3, ],
+#   model = "M3 + Interaction with age"
+#   ) 
+# 
+# result_age_df
+```
+
+## age groups
+
+```{r}
+## ───────────────────────────────────────────────────────────────
+##  M7 : “treated × age_group”   – derive HRs by age‑category
+## ───────────────────────────────────────────────────────────────
+# 1. grab the coefficients and (co)variances once ----------------
+coefs    <- coef(models[["M7: M3 × age group"]])
+vcov_mat <- vcov(models[["M7: M3 × age group"]])
+
+# 2. the three age‑group levels we want reported -----------------
+age_levels <- c("<35", "35–49", "≥50")     # adjust labels if you use others
+
+# 3. look‑up table: which interaction term (if any) belongs to each level
+#    ‑ the reference (<35) has no separate main‑effect or interaction term
+int_name <- c(
+  "<35"  = NA_character_,                              # reference category
+  "35–49" = "treatedHPA:age_group35–49",
+  "≥50"   = "treatedHPA:age_group≥50"
+)
+
+# 4. build the tidy result ---------------------------------------
+results_agegrp <- purrr::map_dfr(age_levels, function(grp){
+
+  ## log‑HR = β_treatedHPA  +  β_int(if any)
+  log_hr <- coefs["treatedHPA"]
+  if (!is.na(int_name[grp]))           # add interaction if that term exists
+    log_hr <- log_hr + coefs[int_name[grp]]
+
+  ## Var(log‑HR) = Var(β1) + Var(β2) + 2·Cov(β1,β2)     (if interaction present)
+  var_hr <- vcov_mat["treatedHPA","treatedHPA"]
+  if (!is.na(int_name[grp])) {
+    var_hr <- var_hr +
+      vcov_mat[int_name[grp], int_name[grp]] +
+      2 * vcov_mat["treatedHPA", int_name[grp]]
+  }
+  se_hr <- sqrt(var_hr)
+
+  tibble(
+    term      = paste0("Age_", grp),
+    estimate  = exp(log_hr),
+    conf.low  = exp(log_hr - 1.96*se_hr),
+    conf.high = exp(log_hr + 1.96*se_hr),
+    model     = "M3 × age_group"
+  )
+})
+
+results_agegrp
+```
+
+
+## Occupation
+```{r}
+# 1. grab coefficients and vcov once
+coefs     <- coef(models[["M8: M3 × occupation"]])
+vcov_mat  <- vcov(models[["M8: M3 × occupation"]])
+
+# 2. define the occupation groups we want
+occ_levels <- c("White-collar high-skilled",        # reference level
+                "White-collar low-skilled",
+                "Blue-collar high-skilled",
+                "Blue-collar low-skilled")
+
+# 3. look-up table: interaction term names (only the 3 groups that
+#    actually appear in the model – the others reuse the main effect)
+int_name <- c(
+  "White-collar high-skilled"  = NA_character_,           # no interaction term
+  "White-collar low-skilled"   = "treatedHPA:ssyk_WBHL_groupWhite-collar low-skilled",
+  "Blue-collar high-skilled"   = "treatedHPA:ssyk_WBHL_groupBlue-collar high-skilled",
+  "Blue-collar low-skilled"    = "treatedHPA:ssyk_WBHL_groupBlue-collar low-skilled"
+)
+
+# 4. build the table -------------------------------------------------------
+results_occ <- purrr::map_dfr(occ_levels, function(grp) {
+
+  ## log-HR  = beta_treatedHPA + beta_interaction(if any)
+  log_hr <- coefs["treatedHPA"]
+  if (!is.na(int_name[grp])) log_hr <- log_hr + coefs[int_name[grp]]
+
+  ## variance = Var(b1) + Var(b2) + 2·Cov(b1,b2)   (if interaction present)
+  var_hr <- vcov_mat["treatedHPA", "treatedHPA"]
+  if (!is.na(int_name[grp])) {
+    var_hr <- var_hr +
+      vcov_mat[int_name[grp], int_name[grp]] +
+      2 * vcov_mat["treatedHPA", int_name[grp]]
+  }
+  se_hr <- sqrt(var_hr)
+
+  tibble(
+    term      = grp,
+    estimate  = exp(log_hr),
+    conf.low  = exp(log_hr - 1.96 * se_hr),
+    conf.high = exp(log_hr + 1.96 * se_hr),
+    model     = "M3 × occupation"
+  )
+})
+
+results_occ
+```
+
+```{r}
+treated_estimates_abstract <- models |>
+  imap_dfr(~ broom::tidy(.x, conf.int = TRUE, transform = "coefs.exp") |> 
+            filter(str_detect(term, "^treated") | str_detect(term, "^n_tests_within_")) |> 
+             mutate(model = .y)) |> ungroup() |>
+  filter(!model %in%  c("M6: M3 x sex" , "M7: M3 × age group", "M7: M3 x age",  "M8: M3 × occupation")) 
+
+treated_estimates_abstract
+```
+
+
+# Bind models together
+```{r}
+
+
+tr_ab <-
+bind_rows(
+  treated_estimates_abstract,
+  results_agegrp,
+  results_sex,
+  results_occ
+) |>
+    mutate(
+    combined = glue::glue(
+      "{sprintf('%.2f', estimate)} ({sprintf('%.2f', conf.low)} - {sprintf('%.2f', conf.high)})"
+    )
+  )
+
+openxlsx::write.xlsx( 
+  tr_ab, here::here("..", "results", "other", "model_estimates_10yr.xlsx")
+  )
+```
+
+```{r}
+tr_ab <- openxlsx::read.xlsx( 
+  here::here("..", "results", "other", "model_estimates_10yr.xlsx")
+  )
+```
+
+
+# get event counts and number of participants
+
+```{r}
+# names(models)
+# 
+# data_cvd %>%
+#   group_by(treated) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1)
+#   ) |> 
+#   mutate(
+#     event_rate = n_events / n_total,
+#     model = "M1: Treated only + birth cohort"
+#   )
+# 
+# 
+# data_cvd %>%
+#   group_by(n_tests_within_5_fac) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1)
+#   )  |> 
+#   mutate(
+#     event_rate = n_events / n_total,
+#     model = "M9: Number of HPAs + covariates in M3"
+#   )
+# 
+# data_cvd %>%
+#   mutate(
+#     Age = case_when(
+#       Age >= 20 & Age < 30  ~ "Age 25",
+#       Age >= 30 & Age < 40  ~ "Age 35",
+#       Age >= 40 & Age < 50  ~ "Age 45",
+#       Age >= 50 & Age < 60  ~ "Age 55",
+#       Age >= 60 & Age < 70  ~ "Age 65",
+#       TRUE                  ~ NA_character_
+#     )
+#   ) %>%
+#   filter(!is.na(Age)) %>%  
+#   group_by(treated, Age) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1)
+#   ) |> 
+#   mutate(
+#     event_rate = n_events / n_total,
+#     model = "M7: M3 x age"
+#   )
+# 
+# data_cvd %>%
+#   group_by(treated, Sex) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1)
+#   ) |> 
+#   mutate(
+#     event_rate = n_events / n_total,
+#     model = "M6: M3 x sex"
+#   )
+# 
+# data_cvd %>%
+#   group_by(treated, ssyk_WBHL_group) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1)
+#   ) |> 
+#   mutate(
+#     event_rate = n_events / n_total,
+#     model = "M8: M3 × occupation"
+#   )
+# 
+# glimpse(data_cvd)
+
+
+## overall treated vs control
+ev_overall <- data_cvd %>%
+  mutate(Subgroup = "treatedHPA") %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  )
+
+# 
+ev_overall_M4 <- data_cvd %>%
+  filter(!is.na(ssyk_WBHL_group)) %>%
+  mutate(Subgroup = "treatedHPA_M4") %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  )
+
+#
+ev_overall_M5 <- data_cvd %>%
+    filter(!is.na(ssyk_WBHL_group), !is.na(KommunSize), !is.na(Place_of_origin)) %>%
+  mutate(Subgroup = "treatedHPA_M5") %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  )
+
+# HPA‐counts
+ev_tests <- data_cvd %>%
+  rename(Subgroup = n_tests_within_5_fac) %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  ) 
+
+# age bins
+# ev_age <- data_cvd %>%
+#   mutate(Subgroup = case_when(
+#     Age >=20 & Age < 30 ~ "Age 25",
+#     Age >=30 & Age < 40 ~ "Age 35",
+#     Age >=40 & Age < 50 ~ "Age 45",
+#     Age >=50 & Age < 60 ~ "Age 55",
+#     Age >=60 & Age < 70 ~ "Age 65",
+#     TRUE               ~ NA_character_
+#   )) %>%
+#   filter(!is.na(Subgroup)) %>%
+#   group_by(Subgroup, treated) %>%
+#   summarise(
+#     n_total  = n(),
+#     n_events = sum(risk_art_flag == 1),
+#     .groups = "drop"
+#   )
+
+
+# age group interaction
+ev_age <- data_cvd %>%
+  mutate(Subgroup = paste0("Age_", age_group)) %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  )
+
+# sex interaction
+ev_sex <- data_cvd %>%
+  mutate(Subgroup = paste0("HPA_", Sex)) %>%
+  group_by(Subgroup, treated) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  )
+
+# occupation interaction
+ev_occ <- data_cvd %>%
+  mutate(Subgroup = ssyk_WBHL_group) %>%
+  group_by(treated, Subgroup) %>%
+  summarise(
+    n_total  = n(),
+    n_events = sum(risk_art_flag == 1),
+    .groups = "drop"
+  ) |> 
+  drop_na(Subgroup) 
+
+# 2) bind all
+ev_all_long <- bind_rows(ev_overall, ev_overall_M4, ev_overall_M5, ev_tests, ev_age, ev_sex, ev_occ)
+
+ev_all_long |> print(n=100)
+
+# 3) pivot to wide so we get control vs HPA in columns
+ev_all_wide <- ev_all_long %>%
+  pivot_wider(
+    names_from  = treated,
+    values_from = c(n_total, n_events),
+    names_glue  = "{.value}_{treated}"
+  ) %>%
+  # rename to explicit
+  rename(
+    n_total_control  = n_total_Control,
+    n_events_control = n_events_Control,
+    n_total_HPA      = n_total_HPA,
+    n_events_HPA     = n_events_HPA
+  ) %>%
+  # compute combined string
+  mutate(
+    events_ratio = paste0(n_events_control, " / ", n_events_HPA),
+    n_ratio = paste0(n_total_control, " / ", n_total_HPA)
+  )
+
+# first pull out the overall control counts
+overall_ctrl <- ev_all_wide %>%
+  filter(Subgroup=="treatedHPA") %>%
+  select(n_total_control, n_events_control)
+
+# 2) fill in NAs for the test‐categories
+ev_all_wide_fixed <- ev_all_wide %>%
+  mutate(
+    n_total_control  = coalesce(n_total_control, overall_ctrl$n_total_control),
+    n_events_control = coalesce(n_events_control, overall_ctrl$n_events_control),
+  ) %>%
+  # recompute the ratio string
+  mutate(
+    events_ratio = paste0(n_events_control, " / ", n_events_HPA),
+    n_ratio      = paste0(n_total_control, " / ", n_total_HPA),
+    # fix the subgroup names for the HPA-tests
+    Subgroup = case_when(
+      Subgroup %in% c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests") ~
+        paste0("n_tests_within_5_fac", Subgroup),
+      TRUE ~ Subgroup
+    )
+  ) |> 
+  filter(Subgroup != "Control") 
+
+# 4) join onto your results
+final_tbl <- tr_ab %>%
+  mutate(
+    term = case_when(
+      model == "M4: + Occupation" ~ "treatedHPA_M4",
+      model == "M5: + municipality & origin" ~ "treatedHPA_M5",
+      TRUE ~ term
+    )
+  ) %>%
+  left_join(ev_all_wide_fixed, by = c("term" = "Subgroup"))
+
+# Inspect
+final_tbl
+
+
+
+
+
+
+
+```
+
+
+
+
+# plot estimates
+
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+
+
+
+```{r}
+tr_ab |> mutate(Event = if_else(str_detect(term, "treated"), "Event", "No event"), 
+                n_paricipants = 100244) |>
+  ggplot(aes(x = estimate, y = fct_reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  # Optionally add numeric labels (the “combined” column)
+  geom_text(aes(label = combined), hjust = -0.1, size = 3) +
+  facet_wrap(~ model, ncol = 1, scales = "free_y") +
+  theme_bw() +
+  labs(
+    x = "Hazard Ratio (HR)",
+    y = NULL,
+    title = "Forest Plot of Model Estimates"
+  ) +
+  coord_cartesian(clip = "off")  # Ensures labels be
+```
+
+
+```{r}
+library(ckbplotr)
+
+# Suppose your DataFrame is called df.
+# Let's rename columns so ckbplotr knows where to look:
+my_results <- final_tbl %>%
+  mutate(Event = if_else(str_detect(term, "treated"), "Event", "No event"), 
+                n_paricipants = 100244,
+         term = if_else(term=="treatedHPA", model, term),
+         term = if_else(term=="treatedHPA_M4", model, term),
+         term = if_else(term=="treatedHPA_M5", model, term)) |>
+  select(
+    events_ratio,
+    n_ratio,
+    term,       
+    estimate, 
+    conf.low, 
+    conf.high
+  ) %>%
+  rename(
+    subgroup = term,
+    est = estimate,
+    lci = conf.low,
+    uci = conf.high
+  )
+
+
+my_results |> count(subgroup)
+
+row_labels <- data.frame(
+  subgroup = c(
+    # Treated
+    "M1: Treated only + birth cohort",
+    "M2: + Age, Sex, Comorbidity & CVD before event",
+    "M3: + Income",
+    "M4: + Occupation", 
+    "M5: + municipality & origin",
+    # No. Tests
+    "n_tests_within_5_facHPA, ≥3 tests",
+    "n_tests_within_5_facHPA, 2 tests", 
+    "n_tests_within_5_facHPA, 1 test", 
+    # Age
+    "Age_<35", "Age_35–49", "Age_≥50",
+    # Sex
+    "HPA_Women", "HPA_Men",
+    # Occupation
+     "White-collar high-skilled",
+     "White-collar low-skilled",
+     "Blue-collar high-skilled",
+     "Blue-collar low-skilled"
+  ),
+  group = c(
+    # Treated
+    "Main models","Main models", "Main models", "Main models", "Main models",
+    # No. Tests
+    "M3 + No. HPAs", "M3 + No. HPAs", "M3 + No. HPAs", 
+    # Age
+    "M3 + Age interaction", "M3 + Age interaction", "M3 + Age interaction", 
+    # Sex
+    "M3 + Sex interaction", "M3 + Sex interaction",
+    # Occupation
+    "M3 + Occupation interaction", "M3 + Occupation interaction", "M3 + Occupation interaction", "M3 + Occupation interaction"
+  ),
+  label = c(
+    # Treated
+    "M1: Birth cohort", 
+    "M2: + Age, Sex, Comorbidity & CVD before event", 
+    "M3: + Income", 
+    "M4: + Occupation",
+    "M5: + Kommun size & Place of origin",  
+    # No. Tests
+     "≥3", "2", "1",
+    # Age
+    "<35", "35–49", "≥50", 
+    # Sex
+    "Women", "Men",
+    # Occupation
+    "White-collar high-skilled",
+    "White-collar low-skilled",
+    "Blue-collar high-skilled",
+    "Blue-collar low-skilled"
+  )
+)
+
+forest_plot(
+  my_results,
+  col.key     = "subgroup",
+  col.lci     = "lci",
+  col.uci     = "uci",
+  exponentiate = FALSE,
+  row.labels   = row_labels,
+  row.labels.levels = c("group","label"),
+  xlab        = "Hazard Ratio (95% CI)",
+    xlim        = c(0.75, 1.02), 
+  xticks      = c(0.6, .8 , 1, 1),
+  nullval      = 1,  
+  plot.margin = margin(8, 8, 2, 8, "mm"),
+  row.labels.heading = "_",
+  col.left        = c("events_ratio", "n_ratio"),   
+  col.left.heading = c("Events, \nControls/HPAs", "No. Participants,  \nControls/HPAs"), 
+    pointsize = 3,
+  shape = 15,
+  plotcolour = "grey20",
+  colour = "#e1800f",
+  cicolour = "#e1800f",
+  fill = "#e1800f"
+)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+
+
+# Forrest plot with the ckbplotr package
+
+```{r}
+library(dplyr)
+library(stringr)
+library(ckbplotr)
+```
+
+
+
+```{r}
+df_forrest_plot <- 
+  read.csv(
+  here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
+)
+
+
+
+
+library(showtext)
+library(systemfonts)
+font_add_google("Roboto", "roboto")
+font_add_google("Noto Sans", "notosans")   # noto *does* contain subscript digits
+font_add_google("Source Sans 3", "sourcesans")   # main text
+font_add("dejavu-bold", regular = systemfonts::match_font("DejaVu Sans", style = "Bold")$path)  
+
+dejavu_bold_path <- match_font("DejaVu Sans", bold = TRUE)$path
+font_add("dejavu-bold", regular = dejavu_bold_path)
+font_add_google("Roboto Flex", "roboto-flex")
+## add a silent fallback with even more glyphs
+font_add("dejavu", regular = systemfonts::match_font("DejaVu Sans")$path)
+showtext_auto()
+```
+
+
+# sorting
+
+```{r}
+
+df_forrest_plot <-
+df_forrest_plot %>%
+  #mutate(subgroup = label) |> 
+
+  mutate(
+    ctrl = glue("{comma(n_Control)} ({comma(events_Control)})"),
+    hpa  = glue("{comma(n_HPA)} ({comma(events_HPA)})")) |> 
+   #   add_row(label = "Sex", block = "Sociodemographics", ctrl = " ", hpa = " ") |> 
+  add_row(label = "Age", block = "Sociodemographics", ctrl = " ", hpa = " ") |> 
+  add_row(label = "Occupation", block = "Sociodemographics", ctrl = " ", hpa = " ") |> 
+  
+  add_row(label = "BMI", block = "Lifestyle related", ctrl = " ", hpa = " ") |> 
+  add_row(label = "VO₂max (mL·kg⁻¹·min⁻¹)", block = "Lifestyle related", ctrl = " ", hpa = " ") |> 
+  add_row(label = "Exercise", block = "Lifestyle related", ctrl = " ", hpa = " ") |> 
+  add_row(label = "Health", block = "Lifestyle related", ctrl = " ", hpa = " ") |> 
+  mutate(
+
+ 
+    label = case_when(
+      label == "HPA, 1 test" ~ "1 assessment",
+      label == "HPA, 2 tests" ~ "2 assessments",
+      label == "HPA, ≥3 tests" ~ "≥3 assessments",
+      
+      label == "BMI: Underweight" ~ "< 18.5",
+      label == "BMI: Normal weight" ~ "18.5-25",
+      label == "BMI: Overweight" ~ "25-30",
+      label == "BMI: Obesity" ~ "≥30",
+      
+      # label == "VO2max: Very high"  ~ "VO[2]*'max ≥50'",
+      # label == "VO2max: High"       ~ "VO[2]*'max 40–49'",
+      # label == "VO2max: Moderate"   ~ "VO[2]*'max 30–39'",
+      # label == "VO2max: Low"        ~ "VO[2]*'max 20–29'",
+      # label == "VO2max: Very low"   ~ "VO[2]*'max <20'",
+      label == "VO2max: Very high"  ~ "≥50",
+      label == "VO2max: High"       ~ "40–49",  # en dash
+      label == "VO2max: Moderate"   ~ "30–39",
+      label == "VO2max: Low"        ~ "20–29",
+      label == "VO2max: Very low"   ~ "<20",
+      
+      label == "Exercise: Good" ~ "3 or more times/week",
+      label == "Exercise: Moderate" ~ "1-2 times/week",
+      label == "Exercise: Low" ~ "Never/sometime",
+      
+      label == "Health: Good" ~ "Good or very good",
+      label == "Health: Moderate" ~ "Niether poor or good",
+      label == "Health: Low" ~ "Poor or very poor",
+      
+      TRUE ~ label
+    ),
+    label = factor(
+      label,
+      levels = c(
+        # Main models
+        "M1: birth cohort",
+        "M2: + age, sex, comorbidity & CVD",
+        "M3: + income",
+        "M4: + occupation",
+        "M5: + municipality & origin",
+        # Number of tests
+        "≥3 assessments",
+        "2 assessments",
+        "1 assessment",
+        # Sociodemographics
+       # "Sex",
+        "Women",
+        "Men",
+        
+        "Age",
+        "<35 yrs",
+        "35–49 yrs",
+        "≥50 yrs",
+        
+        "Occupation",
+        "White-collar high-skilled",
+        "White-collar low-skilled",
+        "Blue-collar high-skilled",
+        "Blue-collar low-skilled",
+        # Lifestyle related
+        "BMI",
+         "<18.5",
+        "18.5-25",
+        "25-30",
+        "≥30",
+        
+        "VO₂max (mL·kg⁻¹·min⁻¹)",
+        "≥50",
+        "40–49", 
+        "30–39",
+        "20–29",
+        "<20",
+        
+        "Exercise",
+        "3 or more times/week",
+        "1-2 times/week",
+        "Never/sometime",
+        
+        "Health",
+        "Good or very good",
+        "Niether poor or good",
+        "Poor or very poor"
+        
+
+        # "VO[2]*'max ≥50'",
+        # "VO[2]*'max 40–49'",
+        # "VO[2]*'max 30–39'",
+        # "VO[2]*'max 20–29'",
+        # "VO[2]*'max <20'"
+        
+      )
+    ),
+     block =
+      case_when(
+        block == "Main models" ~ "Main models",
+        block == "Number of tests" ~ "HPAs within 5 yrs",
+        block == "Lifestyle related" ~ "Lifestyle related*",
+        TRUE ~ block
+      ),
+     block = factor(
+      block,
+      levels = c(
+        "Main models",
+        "HPAs within 5 yrs",
+        "Sociodemographics",
+        "Lifestyle related*"
+      )
+    ), 
+            group_color = 
+      case_when(
+        block == "Main models" ~ block,
+        block == "HPAs within 5 yrs" ~ block,
+        exposure == "m6" ~ "Sex",
+        exposure == "m7" ~ "Age",
+        exposure == "m8" ~ "Occupation",
+        block == "Lifestyle related*" ~ exposure,
+      )
+  ) %>%
+  arrange(block, label) %>%
+  mutate(row = row_number(),
+             across(
+      where(is.character),
+      ~ .x |>
+          str_replace_all("\\p{Z}", " ") |>   # any Unicode space → ascii space
+          str_squish()                        # trim ends + collapse runs
+    ))
+
+df_forrest_plot 
+```
+
+
+
+```{r}
+
+
+library(ggtext)
+
+
+# 1) Build the plotting data, forcing subgroup → character
+my_results <- df_forrest_plot %>%
+  transmute(
+    subgroup      = as.character(label),       # now character
+    ctrl  = ctrl,
+    hpa       = hpa,
+    est           = estimate,
+    lci           = conf.low,
+    uci           = conf.high,
+    exposure = exposure,
+    block        = block,
+    group_color   = group_color
+  ) |> 
+  drop_na(subgroup) 
+
+# 2) Build the row‐labels lookup, also coercing to character
+row_labels <- df_forrest_plot %>%
+  transmute(
+    row = row,
+    subgroup = as.character(label),           # must match my_results$subgroup
+    group    = as.character(block)            # now character
+  ) %>%
+  distinct() %>%
+  mutate(
+    label = subgroup                          # also character
+  ) |> arrange(row) |> 
+  mutate(
+    label = if_else(
+      subgroup %in% c("Sex","Age","Occupation"), #"BMI","Exercise","Health","VO2max"
+      "",   # display nothing
+      subgroup
+    )
+  ) |> 
+  drop_na(subgroup)
+
+
+
+
+
+my_cols <- c(
+  "Main models"     = "#1b9e77",  # teal-green
+  "Number of tests" = "#d95f02",  # burnt orange
+  "Sex"             = "#4CAF50",  # medium green
+  "Age"             = "#81C784",  # light, fresh green
+  "Occupation"      = "#388E3C",  # dark forest green
+  "BMI"             = "#e6ab02",  # mustard yellow
+  "Exercise"        = "#a6761d",  # golden brown
+  "Health"          = "#666666",  # mid grey
+  "VO2"             = "#444444"   # darker grey
+)
+
+
+my_cols <- c(
+  "Main models"       = "#418286",  # teal-green
+  "HPAs within 5 yrs" = "#e1800f",  # burnt orange
+  "Sex"               = "#418286",  # medium green
+  "Age"               = "#e1800f",  # light, fresh green
+  "Occupation"        = "#418286",  # dark forest green
+  "BMI"               = "#e1800f",  # mustard yellow
+  "Exercise"          = "#418286",  # golden brown
+  "Health"            = "#e1800f",  # mid grey
+  "VO2"               = "#418286"   # darker grey
+)
+
+# plot
+
+# col.left.pos, col.right.pos, left.space, right.space, and mid.space
+
+forest_plot(
+  my_results,
+  col.key     = "subgroup",
+  row.labels   = row_labels,    # our lookup table
+  row.labels.levels = c("group","label"),
+  col.lci     = "lci",
+  col.uci     = "uci",
+  exponentiate = FALSE,
+  #col.bold = bold,
+  col.left.pos     = unit(c(1.2, 31), "mm"),
+  left.space      = unit(60, "mm"),
+  col.right.pos    = unit(1.2, "mm"),
+  right.space      = unit(32.7, "mm"),
+
+  xlab         = "HPA vs controls\nHazard ratio (95% CI)",
+  xlim        = c(0.4, 1.5), 
+  xticks      = c(0.6, .8 , 1, 1),
+  nullval      = 1,  
+  # place the two left‐hand text columns
+  col.left        = c("ctrl", "hpa"),
+  col.left.heading = c("Control\nN (events)", "HPA\nN (events)"),
+  col.right.heading = "", 
+  # styling
+  shape         = 15,
+  pointsize     = 2.5,
+  plotcolour    = "grey20",
+  colour        = "group_color",
+  cicolour      = "group_color",
+  fill          = "#e1800f",
+ # basesize      = 12,
+  #base_line_size = 22,
+  plot.margin   = margin(8,8,2,8,"mm"),
+  addarg = list(nullline = c("linetype = 'solid'",
+                                       "colour = 'grey20'")),
+   add = list(
+         start = list(
+           geom_vline(
+        xintercept = c(0.8, 1.2),
+        linetype   = "dashed",
+        colour     = "black",
+        size       = 0.3
+           )
+      ),
+    end = list(
+      scale_x_log10(
+        breaks = c(0.4, 0.6, 0.8, 1, 1.2, 1.5),
+        labels = c("0.4", "0.6", "0.8","1","1.2","1.5"),
+       #         limits = c(0.5, 1.5),
+        expand = expansion(mult = 0),
+         sec.axis = dup_axis(
+          name   = NULL,      # you could put a top‐axis title here
+          breaks = c(0.8, 1, 1.2),
+          labels = c("0.8", "1", "1.2"))
+      ),
+
+      ## supply your own discrete palette:
+      scale_colour_manual(
+        values = my_cols,
+        name   = "Exposure\nblock"
+      ),
+       labs(
+        caption = "*Lifestyle related variables were available only for HPA participants" #  \nno such data were available for controls
+      ),
+
+      ## hide a second legend for the fill aesthetic
+      scale_fill_manual(
+        values = my_cols,
+        guide  = "none"
+      ),
+      theme(
+                axis.title.x.bottom = element_blank(),
+        axis.title.x.top    = element_text(face="bold", vjust = 1),
+        axis.text.x.top     = element_text(),
+        axis.line.x.top      = element_blank(),
+        axis.ticks.length.x.top = unit(0, "mm"),
+        axis.ticks.x.top     = element_line(colour = "black"),
+         text                = element_text(family = c('Source Sans 3', 'roboto-flex','dejavu-bold', 'roboto',  'Source Sans 3')),
+         panel.grid.major.x  = element_blank(),
+         panel.grid.major.y  = element_blank(),
+         panel.grid.minor    = element_blank(),
+                plot.caption      = element_text(
+                               hjust = 2.2,    # left align
+                              # vjust = .5,    # top align
+                               size  = 9,    # a bit smaller
+                               face  = "italic",
+                               margin = margin(t = 5)  # small gap above
+                             )
+       ),
+            annotate(
+        "segment",
+        x      = 0.75,      
+        xend   = 1.25,      
+        y      = Inf,       
+        yend   = Inf,
+        colour = "grey60",
+        size   = 0.5,
+        inherit.aes = FALSE
+      )
+    )
+  )
+) 
+
+
+ggsave(
+  here::here("..", "results", "figures", "forest_plot_ten_yr_lifestyle_interaction_HR.pdf"),
+  width = 210, height = 220, units = "mm", dpi = 300
+)
+# 297
+
+```
+
+
+
+
+
+
+
+
+
+# ggplot code
+
+
+```{r}
+# Prepare data to be plotted using ckbplotr::forest_data()
+datatoplot <- ckbplotr::forest_data(panels = my_results,
+                                    row.labels = row_labels,
+                                    row.labels.levels = c("group", "label"),
+                                    panel.names = "1",
+                                    col.key = "subgroup",
+                                    col.estimate = "est",
+                                    col.stderr = c("stderr", "std.err", "se"),
+                                    col.lci = "lci",
+                                    col.uci = "uci",
+                                    col.left = c("ctrl", "hpa"),
+                                    col.keep = c("group_color", "group_color"),
+                                    exponentiate = FALSE)
+
+# Create the ggplot
+ggplot(datatoplot, aes(y = row, x = estimate_transformed)) +
+
+  # Additional layer
+  list(geom_vline(xintercept = c(0.8, 1.2), linetype = "dashed",     colour = "black", size = 0.3)) +
+  
+  # Put the different panels in side-by-side plots using facets
+  facet_wrap(vars(panel), nrow = 1) +
+  
+  # Add a line at null effect
+  annotate(linetype = 'solid',
+           colour = 'grey20',
+           geom      = "segment",
+           y         = 0.7,
+           yend      = Inf,
+           x         = 1,
+           xend      = 1,
+           linewidth = 0.5) +
+  
+  # Plot points at the transformed estimates
+  geom_point(aes(colour = `group_color`),
+             data   = ~ dplyr::filter(.x,
+                                      estimate_transformed > 0.4,
+                                      estimate_transformed < 1.5,
+                                      !as_diamond),
+             shape  = 15,
+             size   = 2.5,
+             fill   = "#e1800f",
+             stroke = 0,
+             na.rm  = TRUE) +
+  
+  # Plot the CIs
+  geom_errorbar(aes(xmin = pmin(pmax(lci_transformed, 0.4), 1.5),
+                    xmax = pmin(pmax(uci_transformed, 0.4), 1.5),
+                    colour = `group_color`),
+                data = ~ dplyr::filter(.x, !is.na(estimate_transformed), !as_diamond),
+                width     = 0,
+                linewidth = 0.5,
+                na.rm     = TRUE) +
+  
+  # Use identity for aesthetic scales
+  scale_colour_identity() +
+  
+  # Add columns to right side of panels
+  ## column auto_estcolumn
+  ckbplotr::geom_text_move(aes(y = row,
+                               x = 1.5,
+                               label = `auto_estcolumn`),
+                           move_x  = unit(1.2, "mm"),
+                           hjust   = 0,
+                           size    = 3.092846,
+                           colour  = "grey20",
+                           na.rm   = TRUE,
+                           parse   = FALSE) +
+  ckbplotr::geom_text_move(aes(y     = - 0,
+                               x     = 1.5,
+                               label = title),
+                           move_x  = unit(1.2, "mm"),
+                           hjust    = 0,
+                           vjust    = 0,
+                           size     = 3.092846,
+                           colour   = "grey20",
+                           fontface = "bold",
+                           lineheight = 1,
+                           data = ~ dplyr::tibble(panel = sort(unique(.[["panel"]])),
+                                                  title = "")) +
+  
+  # Add columns to left side of panel
+  ## column ctrl
+  ckbplotr::geom_text_move(aes(y = row,
+                               x = 0.4,
+                               label = ctrl),
+                           move_x  = unit(-1.2, "mm"),
+                           hjust   = 1,
+                           size    = 3.092846,
+                           colour  = "grey20",
+                           na.rm   = TRUE,
+                           parse   = FALSE) +
+  ckbplotr::geom_text_move(aes(y     = - 0,
+                               x     = 0.4,
+                               label = title),
+                           move_x  = unit(-1.2, "mm"),
+                           hjust    = 1,
+                           vjust    = 0,
+                           size     = 3.092846,
+                           colour   = "grey20",
+                           fontface = "bold",
+                           lineheight = 1,
+                           data = ~ dplyr::tibble(panel = sort(unique(.[["panel"]])),
+                                                  title = "Control\nN (events)")) +
+  
+  ## column hpa
+  ckbplotr::geom_text_move(aes(y = row,
+                               x = 0.4,
+                               label = hpa),
+                           move_x  = unit(-31, "mm"),
+                           hjust   = 1,
+                           size    = 3.092846,
+                           colour  = "grey20",
+                           na.rm   = TRUE,
+                           parse   = FALSE) +
+  ckbplotr::geom_text_move(aes(y     = - 0,
+                               x     = 0.4,
+                               label = title),
+                           move_x  = unit(-31, "mm"),
+                           hjust    = 1,
+                           vjust    = 0,
+                           size     = 3.092846,
+                           colour   = "grey20",
+                           fontface = "bold",
+                           lineheight = 1,
+                           data = ~ dplyr::tibble(panel = sort(unique(.[["panel"]])),
+                                                  title = "HPA\nN (events)")) +
+  
+  # Add xlab below each axis
+  ckbplotr::geom_text_move(aes(y = Inf,
+                               x = 0.95,
+                               label = xlab),
+                           hjust    = 0.5,
+                           size     = 3.092846,
+                           colour   = "grey20",
+                           vjust    = 1,
+                           move_y   = unit(-7.4228304, "mm"),
+                           fontface = "bold",
+                           data = ~ dplyr::tibble(panel = sort(unique(.[["panel"]])),
+                                                  xlab = "HPA vs controls\nHazard ratio (95% CI)")) +
+  
+  # Set coordinate system
+  coord_cartesian(clip = "off",
+                  xlim = c(0.4, 1.5)) +
+  
+  # Set the scale for the x axis (the estimates and CIs)
+  scale_x_continuous(trans  = "identity",
+                     limits = c(0.4, 1.5),
+                     breaks = c(0.6, 0.8, 1, 1),
+                     expand = c(0,0)) +
+  
+  # Set the scale for the y axis (the rows)
+  scale_y_continuous(trans = "reverse",
+                     breaks = attr(datatoplot, "rowlabels")$row,
+                     labels = attr(datatoplot, "rowlabels")$row.label,
+                     limits = c(max(attr(datatoplot, "rowlabels")$row) + 0.7, NA),
+                     expand = c(0,0)) +
+  
+  # Control the overall look of the plot
+  theme(text             = element_text(size = 11, colour = "grey20"),
+        line             = element_line(linewidth = 0.5),
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title       = element_blank(),
+        axis.line.x      = element_line(colour = "grey20", linewidth = 0.5, lineend = "round"),
+        axis.title       = element_blank(),
+        axis.ticks.x     = element_line(colour = "grey20"),
+        axis.ticks.length.x = unit(2.75,  "pt"),
+        axis.text.x      = element_text(colour = "grey20",
+                                        margin = margin(t = 4.4),
+                                        vjust  = 1),
+        axis.ticks.y     = element_blank(),
+        axis.ticks.length.y = unit(0, "pt"),
+        axis.line.y      = element_blank(),
+        axis.text.y      = ggtext::element_markdown(hjust  = 0,
+                                                    colour = "grey20",
+                                                    margin = margin(r = 60, unit = "mm")),
+        panel.border     = element_blank(),
+        panel.spacing    = unit(32.7, "mm") + unit(5, "mm") + unit(60, "mm"),
+        strip.background = element_blank(),
+        strip.placement  = "outside",
+        strip.text       = element_blank(),
+        legend.position  = "none",
+        plot.background  = element_blank(),
+        plot.margin      = margin(8, 8, 2, 8, "mm") + unit(c(3.092846, 0, 6.185692, 0), "mm") + unit(c(0, 32.7, 0, 0), "mm")) +
+  
+  # Additional layer
+  list(scale_x_log10(breaks = c(0.4, 0.6, 0.8, 1, 1.2, 1.5), labels = c("0.4",     "0.6", "0.8", "1", "1.2", "1.5"), expand = expansion(mult = 0),     sec.axis = dup_axis(name = NULL, breaks = c(0.8, 1, 1.2),         labels = c("0.8", "1", "1.2"))), scale_colour_manual(values = my_cols,     name = "Exposure\nblock"), labs(caption = "* Lifestyle related variables has only values for HPAs"),     scale_fill_manual(values = my_cols, guide = "none"), theme(axis.title.x.bottom = element_blank(),         axis.title.x.top = element_text(face = "bold", vjust = 1),         axis.text.x.top = element_text(), axis.line.x.top = element_blank(),         axis.ticks.length.x.top = unit(0, "mm"), axis.ticks.x.top = element_line(colour = "black"),         text = element_text(family = "Source Sans 3"), panel.grid.major.x = element_blank(),         panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),         plot.caption = element_text(hjust = 6, size = 9, face = "italic",             margin = margin(t = 5))), annotate("segment", x = 0.75,         xend = 1.25, y = Inf, yend = Inf, colour = "grey60",         size = 0.5, inherit.aes = FALSE))
+```
+

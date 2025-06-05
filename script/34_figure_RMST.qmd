@@ -1,0 +1,404 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{r}
+library(tidyverse)
+```
+
+
+
+```{r}
+rmst_models <- read_rds(
+  here::here("..", "results", "predictions",
+             "marginal_rmst_difference_unrestricted_time_points.RDS")
+)
+```
+
+
+```{r}
+# 1. collect your five standsurv outputs into a named list
+# rmst_models <- list(
+#   Overall     = s_rmst_overall,
+#   `HPA count` = s_rmst_hpa,
+#   Sex1         = lst_sex[[1]],
+#   Sex2         = lst_sex[[2]],
+#   Age1          = lst_age[[1]],
+#   Age2         = lst_age[[2]],
+#   Age3          = lst_age[[3]],
+#   Age4          = lst_age[[4]],
+#   Age5          = lst_age[[5]],
+#   Occupation1  = lst_occ[[1]],
+#   Occupation2  = lst_occ[[2]],
+#   Occupation3  = lst_occ[[3]],
+#   Occupation4  = lst_occ[[4]],
+#   Occupation5  = lst_occ[[5]]
+# )
+
+attr(rmst_models$Age_grp3, "standpred_contrast") 
+
+rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
+  # extract the contrast‐table
+  attr(fit_obj, "standpred_contrast") %>%
+    as_tibble() %>%
+    #filter(time %in% keep_times) %>%
+    mutate(
+      Model    = model_name,
+      Subgroup = case_when(
+        contrast == "treated=HPA vs treated=Control"                                                                 ~ "Overall",
+        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"                                ~ "HPA, 1 test",
+        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control"                               ~ "HPA, 2 tests",
+        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"                              ~ "HPA, ≥3 tests",
+        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"                                               ~ "Men",
+        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"                                           ~ "Women",
+        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25"                                                 ~ "Age 25",
+        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35"                                                 ~ "Age 35",
+        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45"                                                 ~ "Age 45",
+        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55"                                                 ~ "Age 55",
+        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65"                                                 ~ "Age 65",
+        contrast == "treated=HPA, age_group=<35 vs treated=Control, age_group=<35"                                   ~ "Age grp <35",
+        contrast == "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49"                               ~ "Age grp 35-44",
+        contrast == "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50"                                   ~ "Age grp ≥50",
+        contrast == "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled"
+                                                                                                                     ~ "White-collar high-skilled",
+        contrast == "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled"
+                                                                                                                     ~ "White-collar low-skilled",
+        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled"
+                                                                                                                     ~ "Blue-collar high-skilled",
+        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled"
+                                                                                                                     ~ "Blue-collar low-skilled",
+        TRUE                                                                                                          ~ NA_character_
+      ),
+        Time  = case_when(time == 1826 ~ "5 yr", 
+                          time == 3653 ~ "10 yr",
+                          time == 7306 ~ "20 yr"),
+      τ_years  = time / 365.25, 
+      ΔRMST = sprintf("%.2f (%.2f–%.2f)",
+                      difference,
+                      difference_lci,
+                      difference_uci),
+            ## convert to years gained per 1 000 persons
+      years_gain_per_1000      = difference      * 1000 / 365.25,
+      years_gain_per_1000_lci  = difference_lci  * 1000 / 365.25,
+      years_gain_per_1000_uci  = difference_uci  * 1000 / 365.25,
+      ## optional pretty label
+      years_gain_per_1000_fmt  = sprintf("%.2f (%.2f–%.2f)",
+                                         years_gain_per_1000,
+                                         years_gain_per_1000_lci,
+                                         years_gain_per_1000_uci),
+      months_gain_per_100py = difference / τ_years / 12 * 100
+                                                # years gained per 100 py
+    ) %>%
+    select(Model, Subgroup, Time, ΔRMST, difference, difference_lci, difference_uci, years_gain_per_1000, years_gain_per_1000_lci, years_gain_per_1000_uci, months_gain_per_100py) 
+})
+  
+rmst_table |> print(n = Inf)
+
+# rmst_wide <- rmst_table %>%
+#   pivot_wider(
+#     names_from  = Time,
+#     values_from = ΔRMST
+#   ) %>%
+#   # optional: order the rows exactly as you listed
+#   mutate(
+#     Model = factor(Model,
+#                    levels = c("Overall","HPA count","Sex","Age","Occupation")),
+#     Subgroup = factor(Subgroup,
+#                       levels = c(
+#                         "Overall",
+#                         "HPA, 1 test","HPA, 2 tests","HPA, ≥3 tests",
+#                         "Men","Women",
+#                         "Age 25","Age 35","Age 45","Age 55","Age 65",
+#                         "White-collar high-skilled","White-collar low-skilled",
+#                         "Blue-collar high-skilled","Blue-collar low-skilled",
+#                         "Unknown occupation"
+#                       ))
+#   ) %>%
+#   arrange(Model, Subgroup) |> 
+#   select(-Model) |> 
+#   # 1) rename the columns
+#   rename(
+#     `Group` = Subgroup,
+#     `ΔRMST 5 yr`     = `5 yr`,
+#     `ΔRMST 10 yr`    = `10 yr`
+#   )
+```
+
+```{r}
+
+# 2) create a forrest plot with the RMST differences
+
+rmst_plot_data <-
+rmst_table |> 
+    mutate(
+      Model    = factor(Model,    levels = c("Overall", "HPA count", "Sex1", "Sex2",
+                  "Age_grp1", "Age_grp2", "Age_grp3")),
+      Subgroup = factor(Subgroup, levels =  c(
+  "Overall",
+  "HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests",
+  "Men", "Women",
+  "Age 25", "Age 35", "Age 45", "Age 55", "Age 65",
+  "Age grp <35", "Age grp 35-44", "Age grp ≥50",
+  "White-collar high-skilled", "White-collar low-skilled",
+  "Blue-collar high-skilled", "Blue-collar low-skilled"
+)),
+Subgroup = fct_rev(Subgroup),
+      Time     = factor(Time,     levels = c("5 yr", "10 yr", "20 yr")),
+Time = fct_rev(Time)
+    ) 
+
+
+rmst_plot_data |> 
+ggplot(aes(x = years_gain_per_1000, y = Subgroup, color = Time)) +
+  geom_point(aes(shape = Time), size = 3, position = position_dodge(width = 1) ) +
+  geom_errorbarh(aes(xmin = years_gain_per_1000_lci, xmax = years_gain_per_1000_uci, group = Time), height = 0.2, position = position_dodge(width = 1) ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  scale_shape_manual(values = c(16, 17, 18)) +
+  labs(
+    x = "Years gained per 1.000 persons",
+    y = "Subgroup",
+    title = "RMST differences by subgroup vs controls"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+
+
+rmst_plot_data |> 
+ggplot(aes(x = difference, y = Subgroup, color = Time)) +
+  geom_point(aes(shape = Time), size = 3, position = position_dodge(width = 1) ) +
+  geom_errorbarh(aes(xmin = difference_lci, xmax = difference_uci, group = Time), height = 0.2, position = position_dodge(width = 1) ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  scale_shape_manual(values = c(16, 17, 18)) +
+  labs(
+    x = "Days gained per average individual",
+    y = "Subgroup",
+    title = "RMST differences by subgroup"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+
+
+
+rmst_plot_data %>% 
+  ggplot(aes(x = difference,          # days gained per person
+             y = Subgroup,
+             colour = Time)) +
+    geom_linerange(aes(xmin = difference_lci,
+                     xmax = difference_uci,
+                     group = Time),
+                 size = 3,
+                     position = position_dodge2(width = 1)) +
+  geom_point(aes(group = Time),
+             fill = "white",
+             color = "white",
+             shape = 21,
+             size = .5,
+             position = position_dodge2(width = 1)) +
+  geom_text(aes(label = ΔRMST, x = 40),
+           position = position_dodge2(width = 1),
+            hjust = -0.2,
+            size = 3) +
+
+             
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey") +
+  scale_colour_manual(values = c("grey40", "#f57c52", "#3a7880")) +
+  scale_shape_manual(values = c(16, 17, 18)) +
+  scale_x_continuous(
+    limits = c(-1, 60),
+      name = "Δ-RMST (days) per avarage individual",
+      sec.axis = dup_axis(~ .  * 1000 / 365.25,          # multiply primary scale by 1 000
+                          name = "Δ-RMST (years) per 1,000 individuals")
+  ) +
+   guides(colour = guide_legend(reverse = TRUE),
+         shape  = guide_legend(reverse = TRUE))  +
+  
+  theme_minimal(base_size = 11, base_family = "sans") +
+  theme(
+    legend.position   = "bottom",
+    legend.title      = element_blank(),
+    panel.grid.major  = element_line(size = .3, colour = "grey90"),
+    panel.grid.minor  = element_blank(),
+    axis.title.x.top  = element_text(margin = margin(b = 8)),
+    plot.title        = element_text(face = "bold", size = 12, hjust = .5)
+  ) +
+  
+  labs(title = "difference in restricted mean CVD‑free time (Δ‑rmst) by subgroup")
+
+# difference in restricted mean CVD‑free time (years) per 1 000 individuals
+#"difference in restricted mean CVD‑free time (days) vs controls"
+# 
+```
+
+
+
+# plot RMST differences by subgroup
+```{r}
+
+
+library(showtext)
+font_add_google("Roboto", "roboto")
+showtext_auto()
+
+# --- 1. wrangle -----------------------------------------------------
+rmst_line_data <- rmst_table %>%                               
+  mutate(
+    groups = case_when(
+      str_starts(Model, "Age") ~ "Age group",
+      str_starts(Model, "Sex") ~ "Sex",
+      TRUE                     ~ Model          # keep original for the rest
+    ),
+    Model = factor(Model, c("Overall", "Sex", "Age group", "HPA count")),
+    # numeric x-axis
+    time_years = readr::parse_number(Time),                    # 5 / 10 / 20
+    # keep factor ordering you already set up
+    Subgroup   = fct_rev(Subgroup)
+  )%>% 
+
+  ## ── add τ = 0 for every group / subgroup ─────────────────────────
+  complete(Subgroup, groups,
+           time_years = c(0, 5, 10, 20),      # <-- include 0
+           fill = list(
+             years_gain_per_1000        = 0,
+             years_gain_per_1000_lci    = 0,
+             years_gain_per_1000_uci    = 0,
+             difference                 = 0,
+             difference_lci             = 0,
+             difference_uci             = 0,
+             ΔRMST                      = "0",    # text label if you use it
+             Time                       = "0 yr"  # optional, for consistency
+           )) %>% 
+  arrange(Model, Subgroup, time_years)
+
+rmst_line_data |>  print(n = Inf)
+
+
+## ---- 1. original wrangling -----------------------------------------
+rmst_line_data <- rmst_table %>%
+  mutate(
+    groups = case_when(
+      str_starts(Model, "Age") ~ "Age group",
+      str_starts(Model, "Sex") ~ "Sex",
+      TRUE                     ~ Model
+    ),
+    groups = factor(groups, c("Overall", "Sex", "Age group", "HPA count")),
+    time_years = readr::parse_number(Time),   # 5 / 10 / 20
+    Subgroup   = fct_rev(Subgroup)
+  )
+
+## ---- 2. make ONE baseline row per (Model, Subgroup) ----------------
+baseline <- rmst_line_data %>% 
+  distinct(Model, Subgroup, groups) %>%          # one per curve
+  mutate(
+    time_years                   = 0,
+    years_gain_per_1000          = 0,
+    years_gain_per_1000_lci      = 0,
+    years_gain_per_1000_uci      = 0,
+    ΔRMST                        = "0",          # if you keep the label
+    Time                         = "0 yr"        # optional
+  )
+
+rmst_line_data0 <- bind_rows(rmst_line_data, baseline) %>% 
+  arrange(Model, Subgroup, time_years) |> 
+    mutate(Subgroup = fct_reorder(Subgroup,
+                                difference,   # or years_gain_per_1000
+                                .desc = TRUE))
+
+
+my_subgroup_cols <- c(
+  "Overall" = "#418286",
+  "Men"   = "#418286",
+  "Women" = "#e1800f",
+  "Age grp <35"   = "#e1800f",
+  "Age grp 35–44" = "grey30",
+  "Age grp ≥50"   = "#418286",
+  "HPA, 1 test" = "#418286",
+  "HPA, 2 tests" = "grey30",
+  "HPA, ≥3 tests" = "#e1800f"
+)
+
+# --- 2. plot --------------------------------------------------------
+ggplot(rmst_line_data0 ,
+       aes(x = time_years,
+           y = years_gain_per_1000,
+           group = Subgroup,
+           colour = Subgroup,
+           fill   = Subgroup)
+       ) +
+
+
+  ## shade *area under the curve* -------------------------
+geom_line()+
+  geom_ribbon(aes(ymin = 0, ymax = years_gain_per_1000),
+              alpha = 1, linewidth = 0)      +              
+  
+  # geom_text(aes(label = Subgroup, x= 3),
+  #           position = position_dodge(width = 0.7),
+  #           data = rmst_line_data0 %>% filter(time_years == 20),
+  #           hjust = -0.2,
+  #           size = 3) +
+  
+    geom_text(data = rmst_line_data0 %>% 
+  filter(time_years == 20),
+            aes(label = Subgroup,
+                color = Subgroup),
+            position = position_nudge(x = 1),   # nudge out to the right
+            hjust = 0, size = 3) +
+  
+    geom_point(data = rmst_line_data0 %>% filter(time_years > 0),
+             position = position_dodge(width = 1.2),
+             color = "grey10") +
+   geom_errorbar(aes(ymin = years_gain_per_1000_lci,
+                    ymax = years_gain_per_1000_uci),
+                 position = position_dodge(width = 1.2),
+                width = 0,            # no horizontal whiskers
+                linewidth = 1,
+                alpha = .7, color = "grey10") +
+  ## … or, if you’d rather show the 95 % CI band instead:
+  # geom_ribbon(aes(ymin = years_gain_per_1000_lci,
+  #                 ymax = years_gain_per_1000_uci),
+  #             alpha = 0.15, linewidth = 0)
+
+  ## connect the points -----------------------------------
+                                 # markers
+
+  ## axes & guides ----------------------------------------
+ scale_x_continuous(
+   position = "top",  
+   limits = c(0, 25),
+   breaks = c(0, 5, 10, 20),
+   labels = c("0 years\nfrom first\nHPA", "5", "10", "20")) +
+scale_y_continuous(expand = expansion(mult = c(0, .05)))  + # 0 at baseline
+  scale_colour_manual(values = my_subgroup_cols) +
+  scale_fill_manual(values = my_subgroup_cols) +
+ # coord_flip() +
+
+  ## labels & titles --------------------------------------
+labs(
+  x = "", # Years from first HPA
+      y = "RMST Δ (years / 1 000 persons), HPAs vs controls",
+      title = "",
+      caption = "Shaded area represents accumulated Δ to controls"
+    ) +
+
+  ## layout options ---------------------------------------
+  facet_wrap(~ groups, ncol = 2,) +       # avoids spaghetti
+  theme_minimal(base_size = 11, base_family = "Roboto") +
+    theme(
+       text = element_text(family = "Roboto"),
+      legend.position = "none",                                # facets are labelled
+      panel.spacing    = unit(1, "lines"),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+          strip.text       = element_blank(),   
+    strip.background = element_blank()
+    )
+```
+
+scale_colour_manual(values = c("grey40", "#f57c52", "#3a7880")

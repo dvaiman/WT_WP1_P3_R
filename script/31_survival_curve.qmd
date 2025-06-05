@@ -1,0 +1,49 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+```{r}
+library(survminer)
+```
+
+
+# data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+
+
+```{r}
+# --------------------------------------------------
+# Step 3: Plot survival curves by the 'treated' group
+# --------------------------------------------------
+# Fit survival curves stratified by the 'treated' variable.
+surv_fit <- survfit(Surv(risk_time_art, risk_art_flag) ~ treated, data = data_cvd)
+
+# Plot the survival curves with a risk table and confidence intervals.
+s <- ggsurvplot(surv_fit,
+           data = data_cvd,
+           #risk.table = "abs_pct",
+           cumevents = TRUE,
+           cumcensor = TRUE,
+           pval = TRUE,
+           conf.int = FALSE,
+           censor.shape = NA, 
+           
+           xlab = "Time (days)",
+           ylab = "Survival probability",
+           ylim = c(0.990, 1),
+           legend.title = "Treated",
+           ggtheme = theme_minimal(),
+  palette = c("#3a7880", "#f57c52") )
+
+
+data_cvd |> count(treated, risk_art_flag)
+
+data_cvd |> summarise(max(risk_time_art))
+```
+

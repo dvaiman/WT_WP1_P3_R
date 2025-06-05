@@ -1,0 +1,311 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+Translation of ICD-9 codes to ICD-10 codes is a complex task that usually requires a detailed mapping table, because there is not always an exact equivalent between the codes in these two systems. This means that it will not be an exact translation.
+
+```{r}
+library(tidyverse)
+```
+
+# read in and update ICD-convert_key
+
+```{r}
+# icd code convert key, from icd 6,7,8,9 to 10
+convert_key <-
+read_delim(
+  here::here("..", "data", "ICD_codes_20210820.csv"),
+  delim = ";",
+  skip = 1,        # increase if there are lines to skip
+  col_names = TRUE
+)
+
+
+mapped_codes <- tribble(
+  ~original_icd,    ~converted_from_icd, ~n,    ~new_icd10_code,           ~plain_language_explanation,                       ~certainty,
+  #------------------------------------------------------
+  # ICD9
+  #------------------------------------------------------
+  "253",   "ICD9", 4373, "E22", "Disorders of pituitary gland (hyper/hypofunction)",           "high",
+  "255",   "ICD9", 2020, "E27", "Disorders of adrenal glands",                                 "high",
+  "340",   "ICD9", 1589, "G35", "Multiple sclerosis",                                          "high",
+  "256",   "ICD9",  745, "E28", "Ovarian dysfunction (e.g., polycystic ovaries)",              "high",
+  "252",   "ICD9",  704, "E21", "Parathyroid gland disorders (hyper-/hypoparathyroidism)",     "approx",
+  "258",   "ICD9",  318, "E31", "Polyglandular endocrine disorders",                           "approx",
+  "257",   "ICD9",  113, "E29", "Testicular dysfunction (e.g., hypogonadism)",                "approx",
+  "254",   "ICD9",   28, "E32", "Diseases of thymus gland",                                    "approx",
+  "335",   "ICD9",   23, "G12", "Anterior horn cell disease (e.g., ALS)",                      "approx",
+  "234",   "ICD9",   21, "D03",  "Could be carcinoma in situ",                                 "approx",
+  "148",   "ICD9",   17, "C12", "Malignant neoplasm of pyriform sinus/hypopharynx area",       "approx",
+  "175",   "ICD9",    4, "C50", "Malignant neoplasm of male breast",                           "approx",
+  "19",    "ICD9",    4, "C80", "Malignant neoplasm, unspecified site",                        "approx",
+  
+  #------------------------------------------------------
+  # ICD8
+  #------------------------------------------------------
+  "340",   "ICD8",  522, "G35", "Multiple sclerosis",                                          "high",
+  "571",   "ICD8",  344, "K74", "Chronic liver disease, cirrhosis",                             "approx",
+  "147",   "ICD8",  271, "C11", "Malignant neoplasm of nasopharynx",                           "high",
+  "14B10", "ICD8",  172, "C14", "	icd-10: in the range C00–C14 (lip, oral cavity, pharynx)",   "approx",
+  "149",   "ICD8",   51, "C13", "Malignant neoplasm of hypopharynx",                           "high",
+  "718",   "ICD8",   51, "M19", "Other arthropathies/joint disorders",                         "approx",
+  "152",   "ICD8",   22, "C17", "Malignant neoplasm of small intestine",                       "approx",
+  "296A",  "ICD8",   21, "F32", "Depressive episode (older code)",                              "approx",
+  "342",   "ICD8",   17, "G81", "Hemiplegia (usually stroke-related)",                         "approx",
+  "348",   "ICD8",   16, "G93", "Other disorders of brain",                                    "approx",
+  "14C20", "ICD8",   14, "C14", "Local extension code, uncertain mapping",    "approx",
+  "296C",  "ICD8",   14, "F32", "Depressive disorders (variant)",                              "approx",
+  "296W",  "ICD8",   14, "F31", "Bipolar disorder (guess)",                                    "approx",
+  "140",   "ICD8",   10, "C00", "Malignant neoplasm of lip",                                   "approx",
+  "314",   "ICD8",   10, "F90", "Hyperkinetic disorders (ADHD)",                               "approx",
+  "14B1070","ICD8",   9, "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "159",   "ICD8",   8,  "C26", "Malignant neoplasm of ill-defined digestive organs",          "approx",
+  "296D",  "ICD8",   7,  "F33", "Recurrent depressive disorder",                               "approx",
+  "14B1050","ICD8",  6,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14B107","ICD8",   6,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "144",   "ICD8",   5,  "C14", "Malignant neoplasm of other oral cavity sites",               "approx",
+  "156",   "ICD8",   5,  "C23", "Malignant neoplasm of gallbladder",                           "approx",
+  "14B05", "ICD8",   4,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14B105","ICD8",   3,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C2005","ICD8",  3,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C1510","ICD8",  2,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15A25", "ICD8",   2,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15A35", "ICD8",   2,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15D05", "ICD8",   2,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "301X",  "ICD8",   2,  "F60", "Personality disorders",                                       "approx",
+  "14B05 0","ICD8",  1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C05", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C0520","ICD8",  1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C15", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "14C1505","ICD8",  1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15A05", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15A10", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "15D15", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "30K05", "ICD8",   1,  "check local registry", "Local extension code, uncertain mapping",    "unknown",
+  "414",   "ICD8",   1,  "I25", "Chronic ischemic heart disease",                              "approx",
+  #------------------------------------------------------
+  # ICD7
+  #------------------------------------------------------
+  "444",   "ICD7",  28,  NA,    "Possibly respiratory condition, older code => check registry","unknown",
+  "581",   "ICD7",  18,  "check local registry","Could be kidney/digestive code in older classification","unknown",
+  "345",   "ICD7",  16,  "G40", "Epilepsy / seizures (older usage)",                           "approx",
+  "201",   "ICD7",  12,  "C81", "Hodgkin lymphoma (older classification)",                    "approx",
+  "224",   "ICD7",  10,  "check local registry","Older classification code => uncertain",     "unknown",
+  "410",   "ICD7",  10,  "I21", "Acute myocardial infarction (older usage)",                  "approx",
+  "411",   "ICD7",   8,  "I20", "Angina pectoris (older usage)",                              "approx"
+)
+
+icd_code_convert_key <- 
+mapped_codes |> filter(certainty != "unknown") |> 
+  bind_rows(convert_key)
+
+
+write_csv(icd_code_convert_key, here::here("..", "data", "ICD_codes_convert_key_20250226.csv"))
+```
+
+
+- Extract ICD-diagnoses from patient registry and the death registry.
+- Merge and select cases based on the base dataset.
+- Create time based variables
+  - From HPA one year forward
+  - From HPA five year forward
+
+```{r}
+
+# icd convert key
+convert_key <-
+read_csv(
+  here::here("..", "data", "ICD_codes_convert_key_20250226.csv")
+)
+
+# patient registers data , inpatient care
+patreg_inpat <- haven::read_sas(here::here("..", "..", "..", "..",
+"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
+"data_socialstyrelsen", "data_raw", "patientreg", "ut_r_par_sv_11104_2024.sas7bdat"))
+
+
+
+
+```
+
+	•	The code standardizes diagnosis codes by first converting all raw diagnosis entries (from multiple ICD versions) to a common format—that is, to the level of one letter followed by two digits (i.e. the ICD10 chapter level). any characters beyond that are dropped so that the analysis uses a consistent level of detail.
+	•	It assigns the ICD version based on the admission year (AR):
+• AR ≤ 1968 is assigned ICD7
+• AR ≤ 1986 is assigned ICD8
+• AR ≤ 1996 is assigned ICD9
+• otherwise, ICD10 is assumed.
+	•	A special rule is added for Skåne: because the region switched to ICD10 later (in 1998), if the admission year is 1997 and the diagnosis code does not start with a letter, it is recoded as ICD9.
+	•	The code then “cleans” the diagnosis code by:
+• For ICD7 and ICD8: keeping only the first three digits (discarding any comma and the following text).
+• For ICD9: removing any trailing letter and additional characters (so that, for example, codes like “205B0”, “184A07”, or “410AA1” are reduced to just the first three digits).
+	•	Finally, the cleaned dataset is merged with a conversion key (using a left join) that maps the original ICD codes to their approximate ICD10 counterparts.And pivoted back to wide. This final merged dataset (version_merged) enables consistent analysis across different periods by aligning older ICD codes to a modern ICD10 framework.
+```{r}
+
+patreg_inpat |> group_by(LopNr, HDIA, AR, INDATUMA,UTDATUMA) |> 
+  summarise(n=n()) |> arrange(desc(n))
+
+patreg_long <-
+  patreg_inpat |> 
+  # remove duplicates
+  distinct() |> 
+  mutate(
+    indatum = ymd(INDATUMA),
+    utdatum = ymd(UTDATUMA),
+    #across(everything(), str_trim), 
+    .after = AR,
+    .keep = "unused",
+    
+  ) |> 
+  pivot_longer(cols = contains("DIA"),
+               names_to = "dia_version",
+               values_to = "dia",
+               values_drop_na = TRUE
+               ) |> 
+  filter(dia != "" & dia != "[BLANKAD]") |> 
+  mutate(
+    dia = str_trim(dia),
+      icd_version = case_when(
+      AR <= 1968 ~ "ICD7",
+      AR <= 1986 ~ "ICD8",
+      AR <= 1996 ~ "ICD9",
+      TRUE ~ "ICD10" 
+    ),
+   icd_version = if_else(
+# Skåne switched to icd 10 later than other, in 1998, so if there are icd codes that look like icd 9 in 1997
+      AR == 1997 & !str_detect(dia, "^[A-Za-z]"), "ICD9", icd_version
+    ),
+# Converting codes to main and not subversions of the icd codes
+      dia = case_when(
+      # icd7: keep the first three digits, remove the comma and anything after
+      icd_version == "ICD7" ~ str_replace(dia, "(\\d{3}),.*", "\\1"),
+      # icd8: keep the first three digits, remove the comma and anything after
+      icd_version == "ICD8" ~ str_replace(dia, "(\\d{3}),.*", "\\1"),
+      # icd9: keep the three digits, remove any with one trailing letter, and any other trailing character after it
+      icd_version == "ICD9" ~ str_replace(dia, "^(\\d{3})[A-Za-z].*", "\\1"),
+       # ICD10: keep one letter followed by one or two digits, remove anything after
+  icd_version == "ICD10" ~ str_replace(dia, "^([A-Z]\\d{1,2}).*", "\\1"),
+        # if it's not icd7, icd8 or icd9, keep as is
+      TRUE ~ dia
+    )
+  )
+
+version_merged <-
+  patreg_long |> 
+  left_join(
+    convert_key,
+    by = c("dia" = "original_icd", "icd_version" = "converted_from_icd")
+  ) |> 
+  mutate(
+      dia = coalesce(new_icd10_code, dia)
+  ) |> 
+  group_by(LopNr, AR, ALDER, indatum, utdatum, dia_version) %>%
+  mutate(dia_id = row_number()) %>%
+  ungroup() |> 
+  # remove duplicates (can have been added after removing [BLANKAD] and recoding ICD codes)
+  filter(dia_id == 1)
+
+version_merged_wide <- version_merged |>
+  select(LopNr, AR, ALDER, indatum, utdatum, dia, dia_version) |> 
+  pivot_wider(
+    id_cols = c(LopNr, AR, ALDER, indatum, utdatum),  
+    names_from = c(dia_version),
+    values_from = dia,
+    values_fill = list(dia = NA)
+  )
+
+
+
+
+# not merged icd codes from icd 7,8,9
+# version_merged |> filter(is.na(new_icd10_code) & !is.na(dia)) |> count(dia, AR, icd_version) |> 
+#   filter(icd_version != "ICD10") |> arrange(desc(n)) |> 
+#   group_by(dia, icd_version) |> 
+#   summarise(n= sum(n))|> arrange(desc(icd_version),desc(n)) 
+
+```
+
+
+
+```{r}
+ write_csv(version_merged_wide, here::here("..", "..", "..", "..",
+"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
+"data_socialstyrelsen", "data_clean", "patientreg", "inpatient_data_clean_2025-02-26.csv"))
+
+
+
+```
+
+
+
+# death register
+
+```{r}
+# death register data
+deathreg <- haven::read_sas(here::here("..", "..", "..", "..",
+"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
+"data_socialstyrelsen", "data_raw", "dodsorsaksreg", "ut_r_dors_11104_2024.sas7bdat"))
+```
+
+
+```{r}
+deathreg |> 
+  pivot_longer(
+    cols = contains("ORSAK"),
+    names_to = "dia_version",
+    values_to = "dia") |> 
+  filter(dia != "") |> 
+  filter(!str_detect(dia, "^[A-Za-z]\\d{2}$")) |> select(dia, ICD)
+
+
+deathreg |>   filter(str_detect(DODSDAT, "00$")) |> select(DODSDAT)
+
+```
+Only main diagnoses are recoded
+If both the month (positions 5–6) and the day (positions 7–8) are “00”, then recode month to “06” and day to “15”.
+If only the month is “00”, then recode month to “06” while leaving the day unchanged.
+If only the day is “00”, then recode day to “15” while leaving the month unchanged.
+
+```{r}
+
+deathreg_clean <-
+deathreg |>
+  mutate(ULORSAK = case_when(
+    ULORSAK == "162" ~ "C34",  # malignant neoplasm of bronchus/lung
+    ULORSAK == "173" ~ "C44",  # malignant neoplasm of skin (non-melanoma)
+    ULORSAK == "174" ~ "C50",  # malignant neoplasm of the breast
+    ULORSAK == "191" ~ "C71",  # malignant neoplasm of the brain
+    ULORSAK == "250" ~ "E11",  # type 2 diabetes mellitus
+    ULORSAK == "303" ~ "F10",  # alcohol-related disorders
+    ULORSAK == "394" ~ "I05",  # rheumatic heart disease
+    ULORSAK == "410" ~ "I21",  # acute myocardial infarction
+    ULORSAK == "952" ~ "S06",  # intracranial injury
+    ULORSAK == "_AV" ~ "Z99",  # administrative/other category
+    TRUE ~ ULORSAK)) |> 
+  select(LopNr, DODSDAT, ULORSAK, contains("MORSA")) |>
+  mutate(
+    DODSDAT = case_when(
+      str_sub(DODSDAT,5,6)=="00" & str_sub(DODSDAT,7,8)=="00" ~ paste0(str_sub(DODSDAT,1,4), "06", "15"),
+      str_sub(DODSDAT,5,6)=="00" ~ paste0(str_sub(DODSDAT,1,4), "06", str_sub(DODSDAT,7,8)),
+      str_sub(DODSDAT,7,8)=="00" ~ paste0(str_sub(DODSDAT,1,6), "15"),
+      TRUE ~ DODSDAT
+    ),
+    DODSDAT = ymd(DODSDAT)
+  )
+
+
+
+```
+
+
+
+
+
+
+```{r}
+ write_csv(deathreg_clean, here::here("..", "..", "..", "..",
+"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
+"data_socialstyrelsen", "data_clean", "dodsorsaksreg", "deathreg_data_clean_2025-02-26.csv"))
+```
+

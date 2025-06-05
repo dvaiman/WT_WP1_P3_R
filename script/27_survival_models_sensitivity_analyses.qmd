@@ -1,0 +1,234 @@
+---
+title: "Sensitivity analyses"
+format: html
+---
+
+we repeated every cox model with follow-up re-defined to start exactly 365 days after the index hpa, removing entire matched clusters in which any member contributed zero person-time beyond this landmark; effect estimates based on these delayed-entry risk sets constitute our one-year wash-out sensitivity analysis.
+
+```{r}
+library(tidyverse)
+library(survival)
+library(marginaleffects)
+```
+
+
+# data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+
+
+```{r}
+
+
+
+# ─────────────────────────────────────────────────────────────
+# 0. add start–stop variables + landmark bookkeeping
+# ─────────────────────────────────────────────────────────────
+
+
+data_cvd_sens <- data_cvd %>%                         # your full analytic file
+    filter(tstop_1y > tstart_1y) |> # only keep those with follow-up time > 0
+    group_by(id_cluster) %>% 
+          mutate(n_cluster = n()) %>% 
+          ungroup() %>% 
+          filter(n_cluster > 4) 
+
+# ─────────────────────────────────────────────────────────────
+# 2. rebuild the OCC and MUN subsets 
+# ─────────────────────────────────────────────────────────────
+data_occ_sens <- data_cvd_sens %>%                     
+  filter(!is.na(ssyk_WBHL_group)) %>% 
+  group_by(id_cluster) %>% 
+  mutate(n_cluster = n()) %>% 
+  ungroup() %>% 
+  filter(n_cluster > 4)
+
+data_mun_sens <- data_cvd_sens %>%                    
+  filter(!is.na(ssyk_WBHL_group),
+         !is.na(KommunSize),
+         !is.na(Place_of_origin)) %>% 
+  group_by(id_cluster) %>% 
+  mutate(n_cluster = n()) %>% 
+  ungroup() %>% 
+  filter(n_cluster > 4)
+
+# ─────────────────────────────────────────────────────────────
+# 3. refit M-series with delayed entry
+# ─────────────────────────────────────────────────────────────
+fits_m_sens <- list(
+
+  m1 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated + birth_cohort,
+             data = data_cvd_sens),
+
+  m2 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag,
+             data = data_cvd_sens),
+
+  m3 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd_sens),
+
+  m4 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated + ssyk_WBHL_group + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_occ_sens),
+
+  m5 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI + ssyk_WBHL_group +
+               KommunSize + Place_of_origin,
+             data = data_mun_sens),
+
+  m6 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated * Sex + birth_cohort + Age +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd_sens),
+
+  m7 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated * age_group + Sex + birth_cohort +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_cvd_sens),
+
+  m8 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               treated * ssyk_WBHL_group + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag +
+               IncomeLevel_CSFVI,
+             data = data_occ_sens),
+
+  m9 = coxph(Surv(tstart_1y, tstop_1y, event_post1y) ~
+               n_tests_within_5_fac + Age + Sex +
+               birth_cohort + comorbidity +
+               cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+             data = data_cvd_sens)   # dose–response
+)
+```
+
+## Get estimates for the main models (M1–M5) and interactions (M6–M8)
+```{r}
+# ───────────────────────────────────────────────────────────────────────────────
+# helper that works for by_var = NULL (main models) or a grouping variable    |
+# ───────────────────────────────────────────────────────────────────────────────
+get_hr <- function(fit, model_id, by_var = NULL) {
+  
+  # 1) get the avg hazard ratio row
+  hr <- avg_comparisons(
+    fit,
+    variables = "treated",
+    by        = TRUE,      # TRUE → one row, could need to be change to by_var for interaction models
+    type      = "lp",
+    transform = "exp"
+  ) |>
+    as_tibble() |>           # collapse comparisons object to tibble
+    mutate(model = model_id, .before = 1)
+  
+  # 2) extract the exact analysis data
+  mf     <- model.frame(fit)
+  status <- mf[[1]][, "status"]
+  dat    <- mf |>
+    mutate(
+      event = status,
+      arm   = if_else(treated %in% c(1, "HPA"), "HPA", "Control")
+    )
+  
+  # 3) count by (by_var + arm) or by arm alone
+  grp_vars <- if (is.null(by_var)) "arm" else c(by_var, "arm")
+  
+  counts <- dat |>
+    group_by(across(all_of(grp_vars))) |>
+    summarise(
+      n      = n(),
+      events = sum(event),
+      .groups = "drop"
+    ) |>
+    pivot_wider(
+      names_from  = arm,
+      values_from = c(n, events),
+      names_glue  = "{.value}_{arm}"
+    )
+  
+  # 4) merge: for by_var = NULL, we know hr has exactly one row → use bind_cols()
+  if (is.null(by_var)) {
+    bind_cols(hr, counts)
+  } else {
+    left_join(hr, counts, by = by_var)
+  }
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# build the main‐effects table (M1–M5), now with n_Control, events_Control, etc. |
+# ───────────────────────────────────────────────────────────────────────────────
+tbl_main <- imap_dfr(
+  fits_m_sens[1:5],          # M1–M5
+  \(fit, nm) get_hr(fit, nm)
+)
+
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# build the interaction tables (M6–M8)                                          |
+# ───────────────────────────────────────────────────────────────────────────────
+tbl_int <- bind_rows(
+  get_hr(fits_m_sens$m6, "M6", by_var = "Sex"),
+  get_hr(fits_m_sens$m7, "M7", by_var = "age_group"),
+  get_hr(fits_m_sens$m8, "M8", by_var = "ssyk_WBHL_group")
+)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# finally, stack them                                                           |
+# ───────────────────────────────────────────────────────────────────────────────
+hr_combined <- bind_rows(tbl_main, tbl_int) |> 
+  mutate(
+    model = coalesce(
+      Sex, age_group, ssyk_WBHL_group, model
+    ),
+    model = case_when(
+      model == "m1" ~ "M1: Birth cohort",
+      model == "m2" ~ "M2: + age, sex, comorbidity, CVD",
+      model == "m3" ~ "M3: + income",
+      model == "m4" ~ "M4: + occupation",
+      model == "m5" ~ "M5: + municipality + origin",
+      TRUE ~ glue::glue("{model}")
+    ),
+    "HR (95% CI)" = glue::glue(
+            "{sprintf('%.2f', estimate)} (",
+      "{sprintf('%.2f', conf.low)}, ",
+      "{sprintf('%.2f', conf.high)})"
+    ),
+  ) |> 
+  select(
+    model,
+    "HR (95% CI)",
+    n_Control, events_Control,
+    n_HPA,     events_HPA,
+    term, contrast,
+    estimate, conf.low, conf.high, p.value
+  )
+
+print(hr_combined, n = nrow(hr_combined))
+
+
+
+```
+
+## save tibble to file
+
+```{r}
+
+openxlsx::write.xlsx(
+  hr_combined,
+  here::here("..", "results", "tables", "hr_tbl_1yr_sensitivity_analyses.xlsx")
+)
+
+```
+
