@@ -7,6 +7,8 @@ format: html
 library(tidyverse)
 library(flexsurv)
 library(tictoc)
+library(broom)
+
 
 ```
 
@@ -20,6 +22,13 @@ source(here::here("script", "02_functions_source_file.R"))
 # Models
 
 Fitting model 3 with unrestricted follow-up.
+This model includes the same covariates as the restricted follow-up model, but allows for unrestricted follow-up time. The model uses a flexible spline approach to estimate the hazard function and includes ancillary interactions to capture time-varying effects of treatment and other covariates.
+The model is specified with the `flexsurvspline` function from the `flexsurv` package, which allows for flexible modeling of survival data.
+
+Expantaion of sex interaction:
+main interaction, men and women start with different treatment effect. With the ancillary interaction, lets the pattern evolv differently over time for both sexes. Combining them lets us model both a different starting point and a different time-trend for women versus men.
+
+
 
 ```{r}
 
@@ -73,45 +82,46 @@ fit_sex_int <- flexsurvspline(
   scale = "hazard"
 )
 
-# Age interaction
-
-fit_age_int <- flexsurvspline(
-  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ 
-    treated * Age +
-    Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
-    IncomeLevel_CSFVI,
-  anc = list(
-    gamma1 = ~ treated:Age,
-    gamma2 = ~ treated:Age,
-    gamma3 = ~ treated:Age
-  ),
-  data  = data_cvd,
-  k     = 2,
-  scale = "hazard"
-)
-
-
-library(rms)          # for rcs()
-#library(splines)       # for ns()
-## ---- Age model ---------------------------------------------
-# splines on age to not extrapolate age indefinitely when calculating CIs for RMST difference
-# interpretation: older patients may start with a large benefit (or harm) that attenuates faster—or slower—than in younger patients, because the three γ‑terms give the interaction a flexible time profile.
-kn <- 3               
-fit_age_spline <- flexsurvspline(
-  Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
-    treated * rcs(Age, kn) +                                    # spline main & interaction
-    Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag +
-    IncomeLevel_CSFVI,
-
-  anc = list(
-    gamma1 = ~ treated * rcs(Age, kn),
-    gamma2 = ~ treated * rcs(Age, kn),
-    gamma3 = ~ treated * rcs(Age, kn)
-  ),
-  data  = data_cvd,
-  k     = 2,
-  scale = "hazard"
-)
+# # Age interaction
+# 
+# fit_age_int <- flexsurvspline(
+#   formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ 
+#     treated * Age +
+#     Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
+#     IncomeLevel_CSFVI,
+#   anc = list(
+#     gamma1 = ~ treated:Age,
+#     gamma2 = ~ treated:Age,
+#     gamma3 = ~ treated:Age
+#   ),
+#   data  = data_cvd,
+#   k     = 2,
+#   scale = "hazard"
+# )
+# 
+# 
+# library(rms)          # for rcs()
+# #library(splines)       # for ns()
+# ## ---- Age model ---------------------------------------------
+# 
+# 
+# 
+# kn <- 3               
+# fit_age_spline <- flexsurvspline(
+#   Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+#     treated * rcs(Age, kn) +                                    # spline main & interaction
+#     Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag +
+#     IncomeLevel_CSFVI,
+# 
+#   anc = list(
+#     gamma1 = ~ treated * rcs(Age, kn),
+#     gamma2 = ~ treated * rcs(Age, kn),
+#     gamma3 = ~ treated * rcs(Age, kn)
+#   ),
+#   data  = data_cvd,
+#   k     = 2,
+#   scale = "hazard"
+# )
 
 # Age group with Age spline
 
@@ -129,26 +139,26 @@ fit_agegrp <- flexsurvspline(
   scale = "hazard")
 
 # Occupation interaction
-# will not converge with interaction term in anc
-fit_occ_int <- flexsurvspline(
-  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ 
-    treated * ssyk_WBHL_group +
-    Sex + Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
-    IncomeLevel_CSFVI,
-  anc = list(
-    gamma1 = ~ treated * ssyk_WBHL_group,
-    gamma2 = ~ treated * ssyk_WBHL_group,
-    gamma3 = ~ treated * ssyk_WBHL_group
-  ),
-  data  = data_cvd |>                     
-  filter(!is.na(ssyk_WBHL_group)) |> 
-  group_by(id_cluster) |> 
-        mutate(n_cluster = n()) |> 
-        ungroup() |> 
-  filter(n_cluster > 4) ,
-  k     = 2,
-  scale = "hazard"
-)
+# # will not converge with interaction term in anc
+# fit_occ_int <- flexsurvspline(
+#   formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~ 
+#     treated * ssyk_WBHL_group +
+#     Sex + Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
+#     IncomeLevel_CSFVI,
+#   anc = list(
+#     gamma1 = ~ treated * ssyk_WBHL_group,
+#     gamma2 = ~ treated * ssyk_WBHL_group,
+#     gamma3 = ~ treated * ssyk_WBHL_group
+#   ),
+#   data  = data_cvd |>                     
+#   filter(!is.na(ssyk_WBHL_group)) |> 
+#   group_by(id_cluster) |> 
+#         mutate(n_cluster = n()) |> 
+#         ungroup() |> 
+#   filter(n_cluster > 4) ,
+#   k     = 2,
+#   scale = "hazard"
+# )
 
 
 # save models as a list 
@@ -157,10 +167,10 @@ list(
   fit_overall = fit_overall,
   fit_n_HPA   = fit_n_hpa,
   fit_sex_int = fit_sex_int,
-  fit_age_int = fit_age_int,
+  #fit_age_int = fit_age_int,
   fit_agegrp = fit_agegrp,
-  fit_age_spline = fit_age_spline,
-  fit_occ_int = fit_occ_int
+  #fit_age_spline = fit_age_spline,
+ # fit_occ_int = fit_occ_int
 )
 
 
@@ -177,9 +187,9 @@ write_rds(
 #)
 ```
 
-main interaction, men and women start with different treatment effect. With the ancillary interaction, lets the pattern evolv differently over time for both sexes. Combining them lets us model both a different starting point and a different time-trend for women versus men.
 
-## Model estimates
+
+## Check model estimates
 
 ```{r}
 tidy(fit_overall, conf.int = TRUE,  transform = "coefs.exp") |> 
@@ -196,7 +206,7 @@ print(n=Inf)
 
 ```
 
-# -
+# _______________________________________________________________________________
 
 # Marginal survival predictions
 
@@ -210,288 +220,19 @@ fit_overall  <- models_unrestricted$fit_overall
 fit_n_hpa    <- models_unrestricted$fit_n_HPA
 fit_sex_int  <- models_unrestricted$fit_sex_int
 fit_age_int  <- models_unrestricted$fit_age_int
-fit_age_spline  <- models_unrestricted$fit_age_spline
-fit_occ_int  <- models_unrestricted$fit_occ_int
-```
-
-
-## RMST
-
-```{r}
-
-
-# # common vector of times (days)
-# t_points <- c(0, 183, 365, 1096, 1826, 3653)
-# 
-# # Overall
-# 
-# s_rmst_by_overall <- standsurv(
-#   object   = fit_overall,
-#   type     = "rmst",
-#   contrast = "difference",
-#   t        = c(c(0, 183, 365, 547, 730, 1096, 1460, 1826), seq(2190, 10740, by = 365)), 
-#   at       = list(
-#     list(treated = "Control"),
-#     list(treated = "HPA")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE  
-# )
-# 
-# 
-# 
-# # Number of HPAs
-# s_rmst_by_hpas <- standsurv(
-#   object   = fit_n_hpa,
-#   type     = "rmst",
-#   contrast = "difference",
-#   t        = t_points,
-#   at       = list(
-#     list(n_tests_within_5_fac = "Control"),
-#     list(n_tests_within_5_fac = "HPA, 1 test"),
-#     list(n_tests_within_5_fac = "HPA, 2 tests"),
-#     list(n_tests_within_5_fac = "HPA, ≥3 tests")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE  
-# )
-# 
-# 
-# 
-# # Sex
-# 
-# s_rmst_by_sex <- standsurv(
-#   object   = fit_sex_int,
-#   type     = "rmst",
-#   contrast = "difference",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", Sex = "Men"),
-#     list(treated = "Control", Sex = "Women"),
-#     list(treated = "HPA",     Sex = "Men"),
-#     list(treated = "HPA",     Sex = "Women")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE  
-# )
-# 
-# # Age
-# s_rmst_by_age <- standsurv(
-#   object   = fit_age_int,
-#   type     = "rmst",
-#   contrast = "difference",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", Age = 25),
-#     list(treated = "Control", Age = 35),
-#     list(treated = "Control", Age = 45),
-#     list(treated = "Control", Age = 55),
-#     list(treated = "Control", Age = 65),
-#     list(treated = "HPA",     Age = 25),
-#     list(treated = "HPA",     Age = 35),
-#     list(treated = "HPA",     Age = 45),
-#     list(treated = "HPA",     Age = 55),
-#     list(treated = "HPA",     Age = 65)
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE  
-# )
-# 
-# # Occupation
-# 
-# 
-# s_rmst_by_occ <- standsurv(
-#   object   = fit_occ_int,
-#   type     = "rmst",
-#   contrast = "difference",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", ssyk_WBHL_group = "White-collar high-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "White-collar low-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Blue-collar high-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Blue-collar low-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Unknown"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "White-collar high-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "White-collar low-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Blue-collar high-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Blue-collar low-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Unknown")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE  
-# )
-# 
-# marginal_survival_predictions_unrestricted_five_time_points <-
-# list(
-#   s_rmst_by_overall,
-#   s_rmst_by_hpas,
-#   s_rmst_by_sex,
-#   s_rmst_by_age,
-#   s_rmst_by_occ
-# )
-
-
-saveRDS(
-  marginal_survival_predictions_unrestricted_five_time_points,
-  here::here("..", "results", "predictions", "marginal_survival_predictions_unrestricted_five_time_points.RDS")
-)
-
-```
-
-## Hazard Ratios
-
-```{r}
-
-# 
-# 
-# # 1. Overall hazard ratio (HPA vs Control)
-# s_hr_overall <- standsurv(
-#   object   = fit_overall,
-#   type     = "hazard",
-#   contrast = "ratio",
-#   t        = c(c(0, 183, 365, 547, 730, 1096, 1460, 1826), seq(2190, 10740, by = 365)),
-#   at       = list(
-#     list(treated = "Control"),
-#     list(treated = "HPA")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE
-# )
-# 
-# # 2. Hazard ratio by number of HPAs
-# s_hr_hpa_counts <- standsurv(
-#   object   = fit_n_hpa,
-#   type     = "hazard",
-#   contrast = "ratio",
-#   t        = t_points,
-#   at       = list(
-#     list(n_tests_within_5_fac = "Control"),
-#     list(n_tests_within_5_fac = "HPA, 1 test"),
-#     list(n_tests_within_5_fac = "HPA, 2 tests"),
-#     list(n_tests_within_5_fac = "HPA, ≥3 tests")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE
-# )
-# 
-# # 3. Hazard ratio by sex
-# s_hr_by_sex <- standsurv(
-#   object   = fit_sex_int,
-#   type     = "hazard",
-#   contrast = "ratio",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", Sex = "Men"),
-#     list(treated = "Control", Sex = "Women"),
-#     list(treated = "HPA",     Sex = "Men"),
-#     list(treated = "HPA",     Sex = "Women")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE
-# )
-# 
-# # 4. Hazard ratio by age
-# s_hr_by_age <- standsurv(
-#   object   = fit_age_int,
-#   type     = "hazard",
-#   contrast = "ratio",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", Age = 25),
-#     list(treated = "Control", Age = 35),
-#     list(treated = "Control", Age = 45),
-#     list(treated = "Control", Age = 55),
-#     list(treated = "Control", Age = 65),
-#     list(treated = "HPA",     Age = 25),
-#     list(treated = "HPA",     Age = 35),
-#     list(treated = "HPA",     Age = 45),
-#     list(treated = "HPA",     Age = 55),
-#     list(treated = "HPA",     Age = 65)
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE
-# )
-# 
-# # 5. Hazard ratio by occupation
-# s_hr_by_occ <- standsurv(
-#   object   = fit_occ_int,
-#   type     = "hazard",
-#   contrast = "ratio",
-#   t        = t_points,
-#   at       = list(
-#     list(treated = "Control", ssyk_WBHL_group = "White-collar high-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "White-collar low-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Blue-collar high-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Blue-collar low-skilled"),
-#     list(treated = "Control", ssyk_WBHL_group = "Unknown"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "White-collar high-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "White-collar low-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Blue-collar high-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Blue-collar low-skilled"),
-#     list(treated = "HPA",     ssyk_WBHL_group = "Unknown")
-#   ),
-#   ci       = TRUE,
-#   boot     = FALSE
-# )
-# 
-# # collect into a list
-# hazard_ratio_predictions <- list(
-#   overall       = s_hr_overall,
-#   hpa_counts    = s_hr_hpa_counts,
-#   by_sex        = s_hr_by_sex,
-#   by_age        = s_hr_by_age,
-#   by_occupation = s_hr_by_occ
-# )
-# 
-# # save to disk
-saveRDS(
-  hazard_ratio_predictions,
-  here::here("..", "results", "predictions",
-             "marginal_hazard_ratio_unrestricted_time_points.RDS")
-)
+#fit_age_spline  <- models_unrestricted$fit_age_spline
+#fit_occ_int  <- models_unrestricted$fit_occ_int
 ```
 
 
 
-```{r}
-s_hazard_hr <- attr(s_hazard_hr_unrestricted, "standpred_at")
-s_hazard_hr <- attr(s_hazard_hr_unrestricted, "standpred_contrast")
-```
-
-```{r}
-ages <- c(25,35,45,55,65)
-tic("HR – age")
-lst_age <- map(ages, function(a)
-  quick_standsurv(
-    fit      = fit_age_spline,
-   # newdata  = data_cvd,
-    at       = list(
-                 list(treated = "Control", Age = a),
-                 list(treated = "HPA",     Age = a)),
-    t        = t_hr,
-    type     = "hazard",
-    contrast = "ratio",
-    ci       = TRUE) |>
-    mutate(Age = a))
-s_hr_age <- bind_rows(lst_age)
-toc()
-
- model.frame(fit_age_spline) |> select(!"Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted)") |> 
-   count(across(everything()), name = "(weights)") 
-   
-
-hr_age <- standsurv(
-  object   = fit_age_spline,
-  at       = atlist,
-  t        = t_hr,
-  newdata = 
-  type     = "hazard",
-  contrast = "ratio",
-  ci       = TRUE) 
-```
 
 
-# Run function
+
+
+
+
+
 # HR
 ```{r}
 ## landmark times -------------------------------------------------
@@ -641,764 +382,9 @@ read_rds(
 ```
 
 
-## HR 2 older func
-```{r}
-## 0. landmark times for the table / plot ------------------------
-t_hr <- c(90, 183, 365, 1096, 1826, 3653)  
-t_hr <- c(183, 365, 547, 730, 1096, 1460, 1826,
-             seq(2190, 10740, by = 365))
 
-ci_meth <- "delta"      # change to "boot" for bootstrap CIs
-n_quad  <- 30
+# RMST
 
-## 1 ───────────────── Overall  (HPA vs Control) -----------------
-tic("HR overall")
-s_hr_overall <- fast_stand(
-  fit        = fit_overall,
-  data       = data_cvd,
-  at         = list(
-    list(treated = "Control"),
-    list(treated = "HPA")
-  ),
-  t          = t_hr,
-  type       = "hazard",
-  contrast   = "ratio",
-  ci         = TRUE,
-  ci_method  = ci_meth,
-  n_quad     = n_quad
-)
-toc()
-
-## 2 ───────────────── by HPA count (No HPA = ref) ---------------
-tic("HR – HPA count")
-s_hr_hpa <- fast_stand(
-  fit        = fit_n_hpa,
-  data       = data_cvd,
-  at         = list(
-    list(n_tests_within_5_fac = "Control"),        # reference
-    list(n_tests_within_5_fac = "HPA, 1 test"),
-    list(n_tests_within_5_fac = "HPA, 2 tests"),
-    list(n_tests_within_5_fac = "HPA, ≥3 tests")
-  ),
-  t          = t_hr,
-  type       = "hazard",
-  contrast   = "ratio",
-  ci         = TRUE,
-  ci_method  = ci_meth,
-  n_quad     = n_quad
-)
-toc()
-
-## 3 ───────────────── by sex  (run once per sex) ----------------
-sex_levels <- c("Men", "Women")
-
-tic("HR – sex")
-lst_sex <- map(sex_levels, function(sx) {
-  fast_stand(
-    fit        = fit_sex_int,
-    data       = data_cvd,
-    at         = list(
-      list(treated = "Control", Sex = sx),   # reference = Control within that sex
-      list(treated = "HPA",     Sex = sx)
-    ),
-    t          = t_hr,
-    type       = "hazard",
-    contrast   = "ratio",
-    ci         = TRUE,
-    ci_method  = ci_meth,
-    n_quad     = n_quad
-  ) |>
-    mutate(Sex = sx)
-})
-s_hr_sex <- bind_rows(lst_sex)
-toc()
-
-## 4 ───────────────── by age  (loop over the five ages) ---------
-ages <- c(25, 35, 45, 55, 65)
-
-tic("HR – age")
-lst_age <- map(ages, function(a){
-  fast_stand(
-    fit        = fit_age_int,
-    data       = data_cvd,
-    at         = list(
-      list(treated = "Control", Age = a),    # Control@age a  (reference)
-      list(treated = "HPA",     Age = a)
-    ),
-    t          = t_hr,
-    type       = "hazard",
-    contrast   = "ratio",
-    ci         = TRUE,
-    ci_method  = ci_meth,
-    n_quad     = n_quad
-  ) |>
-    mutate(Age = a)
-})
-s_hr_age <- bind_rows(lst_age)
-toc()
-
-## 5 ───────────────── by occupation  (loop five groups) ---------
-occ_levels <- c(
-  "White-collar high-skilled",
-  "White-collar low-skilled",
-  "Blue-collar high-skilled",
-  "Blue-collar low-skilled"
-)
-
-tic("HR – occupation")
-lst_occ <- map(occ_levels, function(occ){
-  fast_stand(
-    fit        = fit_occ_int,
-    data       = data_cvd,
-    at         = list(
-      list(treated = "Control", ssyk_WBHL_group = occ),   # reference
-      list(treated = "HPA",     ssyk_WBHL_group = occ)
-    ),
-    t          = t_hr,
-    type       = "hazard",
-    contrast   = "ratio",
-    ci         = TRUE,
-    ci_method  = ci_meth,
-    n_quad     = n_quad
-  ) |>
-    mutate(ssyk_WBHL_group = occ)
-})
-s_hr_occ <- bind_rows(lst_occ)
-toc()
-
-## 6 ───────────────── save the five fit-objects -----------------
-
-##  put every standsurv result into ONE list  -----------------
-hr_models <- list(
-  Overall       = s_hr_overall,
-  `HPA count`   = s_hr_hpa,
-  Sex1          = lst_sex[[1]],   # Men
-  Sex2          = lst_sex[[2]],   # Women
-  Age1          = lst_age[[1]],   # 25
-  Age2          = lst_age[[2]],   # 35
-  Age3          = lst_age[[3]],   # 45
-  Age4          = lst_age[[4]],   # 55
-  Age5          = lst_age[[5]],   # 65
-  Occupation1   = lst_occ[[1]],
-  Occupation2   = lst_occ[[2]],
-  Occupation3   = lst_occ[[3]],
-  Occupation4   = lst_occ[[4]],
-  Occupation5   = lst_occ[[5]]
-)
-
-write_rds(
-  hr_models,
-  here::here("..", "results", "predictions",
-             "marginal_hazard_ratio_unrestricted_time_points.RDS")
-)
-
-```
-
-
-```{r}
-## which landmark times do you want in the final table? ------
-keep_times <- c(183, 365, 1096, 1826, 3653)   # 6 mo, 1 yr, 3 yr, 5 yr, 10 yr
-
-## pull the contrast tables, tidy & recode -------------------
-
-hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
-
-  attr(fit_obj, "standpred_contrast") |>
-    as_tibble() |>
-    filter(time %in% keep_times) |>
-    mutate(
-      Model    = model_name,
-      Subgroup = case_when(
-        ## Overall
-        contrast == "treated=HPA vs treated=Control"                                ~ "Overall",
-
-        ## HPA count
-        contrast == "n_tests_within_5_fac=Control"                                 ~ "No HPA",
-        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"  ~ "HPA, 1 test",
-        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control" ~ "HPA, 2 tests",
-        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"~ "HPA, ≥3 tests",
-
-        ## Sex
-        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"             ~ "Men",
-        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"         ~ "Women",
-
-        ## Age
-        str_detect(contrast, "Age=25")                                              ~ "Age 25",
-        str_detect(contrast, "Age=35")                                              ~ "Age 35",
-        str_detect(contrast, "Age=45")                                              ~ "Age 45",
-        str_detect(contrast, "Age=55")                                              ~ "Age 55",
-        str_detect(contrast, "Age=65")                                              ~ "Age 65",
-
-        ## Occupation  (use only the part after the final “=”)
-        str_detect(contrast, "ssyk_WBHL_group")                                     ~
-          str_trim(str_extract(contrast, "[^=]+$")),
-
-        TRUE ~ NA_character_
-      ),
-      Time = case_when(
-        time ==  183 ~ "6 mo",
-        time ==  365 ~ "1 yr",
-        time == 1096 ~ "3 yr",
-        time == 1826 ~ "5 yr",
-        time == 3653 ~ "10 yr"
-      ),
-      HR_str = if_else(
-        ratio == 1 & is.na(ratio_lci),
-        "1.00 (ref)",
-        sprintf("%.2f (%.2f–%.2f)", ratio, ratio_lci, ratio_uci)
-      )
-    ) |>
-    select(Model, Subgroup, Time, HR_str)
-})
-
-## reshape to one row per subgroup & pretty-print ------------
-hr_wide <- hr_table |>
-  pivot_wider(
-    names_from  = Time,
-    values_from = HR_str
-  ) |>
-  mutate(
-    Model = factor(Model,
-                   levels = c("Overall","HPA count","Sex","Age","Occupation")),
-    Subgroup = factor(Subgroup, levels = c(
-      "Overall",
-      "No HPA","HPA, 1 test","HPA, 2 tests","HPA, ≥3 tests",
-      "Men","Women",
-      "Age 25","Age 35","Age 45","Age 55","Age 65",
-      "White-collar high-skilled","White-collar low-skilled",
-      "Blue-collar high-skilled","Blue-collar low-skilled",
-      "Unknown"
-    ))
-  ) |>
-  arrange(Model, Subgroup) |>
-  select(-Model) |>
-  rename(
-    Group      = Subgroup,
-    `HR 6 mo`  = `6 mo`,
-    `HR 1 yr`  = `1 yr`,
-    `HR 3 yr`  = `3 yr`,
-    `HR 5 yr`  = `5 yr`,
-    `HR 10 yr` = `10 yr`
-  )
-
-print(hr_wide, n = Inf)
-```
-
-
-
-Old HR
-```{r}
-## 0. shared time vectors -------------------------------------------------
-t_short <- c(1, 183, 365, 1096, 1826, 3653)
-t_long  <- c(1, 183, 365, 547, 730, 1096, 1460, 1826,
-             seq(2190, 10740, by = 365))
-
-tic("HR overall")
-## 1. overall  ------------------------------------------------------------
-s_hr_overall    <- fast_stand(
-  fit   = fit_overall,
-  data  = data_cvd,
-  at    = list(list(treated="Control"), list(treated="HPA")),
-  t     = t_short,
-  type  = "hazard",
-  contrast = "ratio" )
-
-## 2. by HPA count --------------------------------------------------------
-s_hr_hpa  <- fast_stand(
-  fit  = fit_n_hpa,
-  data = data_cvd,
-  at   = list(
-      list(n_tests_within_5_fac="Control"),
-      list(n_tests_within_5_fac="HPA, 1 test"),
-      list(n_tests_within_5_fac="HPA, 2 tests"),
-      list(n_tests_within_5_fac="HPA, ≥3 tests")),
-  t    = t_short,
-  type = "hazard",
-  contrast = "ratio")
-
-## 3. by sex --------------------------------------------------------------
-s_hr_sex  <- fast_stand(
-  fit  = fit_sex_int,
-  data = data_cvd,
-  at   = list(
-      list(treated="Control", Sex="Men"),
-      list(treated="Control", Sex="Women"),
-      list(treated="HPA",     Sex="Men"),
-      list(treated="HPA",     Sex="Women")),
-  t    = t_short,
-  type = "hazard",
-  contrast = "ratio")
-
-## 4. by age --------------------------------------------------------------
-
-ages <- c(25,35,45,55,65)
-s_hr_age  <- fast_stand(
-  fit  = fit_age_int,
-  data = data_cvd,
-    at       = list(
-    list(treated = "Control", Age = 25),
-    list(treated = "Control", Age = 35),
-    list(treated = "Control", Age = 45),
-    list(treated = "Control", Age = 55),
-    list(treated = "Control", Age = 65),
-    list(treated = "HPA",     Age = 25),
-    list(treated = "HPA",     Age = 35),
-    list(treated = "HPA",     Age = 45),
-    list(treated = "HPA",     Age = 55),
-    list(treated = "HPA",     Age = 65)
-  ),
-  t    = t_short,
-  type = "hazard",
-  contrast = "ratio")
-
-## 5. by occupation -------------------------------------------------------
-at_occ <- list(
-  list(treated="Control", ssyk_WBHL_group="White-collar high-skilled"),
-  list(treated="Control", ssyk_WBHL_group="White-collar low-skilled"),
-  list(treated="Control", ssyk_WBHL_group="Blue-collar high-skilled"),
-  list(treated="Control", ssyk_WBHL_group="Blue-collar low-skilled"),
-  list(treated="Control", ssyk_WBHL_group="Unknown"),
-  list(treated="HPA",     ssyk_WBHL_group="White-collar high-skilled"),
-  list(treated="HPA",     ssyk_WBHL_group="White-collar low-skilled"),
-  list(treated="HPA",     ssyk_WBHL_group="Blue-collar high-skilled"),
-  list(treated="HPA",     ssyk_WBHL_group="Blue-collar low-skilled"),
-  list(treated="HPA",     ssyk_WBHL_group="Unknown"))
-
-
-
-s_hr_occ  <- fast_stand(
-  fit  = fit_occ_int,
-  data = data_cvd,
-  at   = at_occ,
-  t    = t_short,
-  type = "hazard",
-  contrast = "ratio")
-
-toc()
-
-
-# save models
-hr_models <- list(
-  Overall     = s_hr_overall,
-  `HPA count` = s_hr_hpa,
-  Sex         = s_hr_sex,
-  Age         = s_hr_age,
-  Occupation  = s_hr_occ
-)
-
-write_rds(
-  hr_models,
-  here::here("..", "results", "predictions",
-             "marginal_hazard_ratio_unrestricted_time_points.RDS")
-)
-
-
-
-attr(s_hr_overall, "standpred_at")
-
-all_hrs <- dplyr::bind_rows(
-  s_hr_overall  %>% mutate(model = "Overall"),
-  s_hr_hpa      %>% mutate(model = "HPA count"),
-  s_hr_sex      %>% mutate(model = "Sex"),
-  s_hr_age      %>% mutate(model = "Age"),
-  s_hr_occ      %>% mutate(model = "Occupation")
-)
-
-
-
-# put all your HR‐stands​urv objects in a named list
-hr_fits <- list(
-  overall    = s_hr_overall,
-  hpa_counts = s_hr_hpa,
-  by_sex     = s_hr_sex,
-  by_age     = s_hr_age,
-  by_occ     = s_hr_occ
-)
-
-# extract the contrast tables and combine
-hr_long <- imap_dfr(hr_fits, ~ {
-  attr(.x, "standpred_contrast") %>% 
-    rename(
-      HR     = ratio,
-      HR_lci = ratio_lci,
-      HR_uci = ratio_uci
-    ) %>%
-    mutate(model = .y)
-}) |> 
-  mutate(
-    subgroup = case_when(
-      model == "overall"    & contrast == "2" ~ "HPA vs Control",
-      model == "hpa_counts" & contrast == "2" ~ "1 test vs Control",
-      model == "hpa_counts" & contrast == "3" ~ "2 tests vs Control",
-      model == "hpa_counts" & contrast == "4" ~ "≥3 tests vs Control",
-      # … and so on for by_sex, by_age, by_occ
-      TRUE ~ paste0("contrast ", contrast)
-    )
-  )
-
-ggplot(hr_long, aes(x = time/365, y = HR, color = subgroup)) +
-  geom_line() +
-  geom_ribbon(aes(ymin = HR_lci, ymax = HR_uci, fill = subgroup),
-              alpha = 0.2, colour = NA) +
-  facet_wrap(~ model, scales = "free_y") +
-  scale_x_continuous("Years since baseline", breaks = c(0,1,2,3,4,5,10)) +
-  ylab("Hazard ratio") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
-
-```{r}
-# 1. Grab just the contrast columns + model/time
-hr_long <- all_hrs %>% 
-  select(model, time, starts_with("contrast")) %>% 
-
-  # 2. Pivot to long so each row is one contrast/stat/time
-  pivot_longer(
-    cols      = -c(model, time),
-    names_to  = "name",
-    values_to = "value"
-  ) %>% 
-  drop_na(value) |> 
-
-  # 3. Pull out the contrast number and stat (est/lci/uci)
-  extract(
-    col   = name,
-    into  = c("contrast", "stat"),
-    regex = "contrast(\\d+)_1(?:_(lci|uci))?"
-  ) %>% 
-  # missing stat means the point‐estimate
-  mutate(stat = if_else(is.na(stat), "est", stat)) %>% 
-
-  # 4. Spread the stat back to columns
-  pivot_wider(
-    names_from  = stat,
-    values_from = value
-  ) %>% 
-
-  # 5. Label each contrast
-  mutate(subgroup = recode(
-    contrast,
-    `2` = "HPA vs Control",
-    `3` = "HPA, 1 test vs Control",
-    `4` = "HPA, 2 tests vs Control",
-    `5` = "HPA, ≥3 tests vs Control"
-  )) %>% 
-
-  # 6. Tidy up
-  rename(
-    HR     = est,
-    HR_lci = lci,
-    HR_uci = uci
-  ) %>% 
-  select(model, subgroup, time, HR, HR_lci, HR_uci)
-
-# 7. Quick glance
-print(hr_long)
-
-# 8. And now plot
-ggplot(hr_long, aes(x = time/365, y = HR, color = subgroup)) +
-  geom_line() +
-  geom_ribbon(aes(ymin = HR_lci, ymax = HR_uci, fill = subgroup),
-              alpha = 0.2, color = NA) +
-  facet_wrap(~ model) +
-  scale_x_continuous("Years since baseline", breaks = c(0, 1, 2, 3, 4, 5, 10)) +
-  ylab("Hazard ratio (HPA vs Control)") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
-
-## Table
-
-```{r}
-library(dplyr)
-library(purrr)
-library(tidyr)
-
-keep_times <- c(183, 365, 1096, 1826, 3653)
-
-# 1. Put your five standsurv outputs into a named list
-hr_models <- list(
-  Overall     = s_hr_overall,
-  `HPA count` = s_hr_hpa,
-  Sex         = s_hr_sex,
-  Age         = s_hr_age,
-  Occupation  = s_hr_occ
-)
-
-hr_tables <- imap(hr_models, function(ss, model_name) {
-  tab <- attr(ss, "standpred_contrast") %>%
-    rename(
-      subgroup = contrast,
-      HR       = ratio,
-      HR_lci   = ratio_lci,
-      HR_uci   = ratio_uci
-    ) %>%
-    mutate(model = model_name) %>%
-    select(model, subgroup, time, HR, HR_lci, HR_uci) %>%
-    filter(time %in% keep_times)
-
-  # insert the ref‐row if there are >2 levels:
-  ats <- attr(ss, "at")
-  if (length(ats) > 2) {
-    ref_label <- unlist(ats[[1]])[1]
-    ref_df <- tibble(
-      model    = model_name,
-      subgroup = ref_label,
-      time     = keep_times,
-      HR       = 1,
-      HR_lci   = NA_real_,
-      HR_uci   = NA_real_
-    )
-    tab <- bind_rows(ref_df, tab)
-  }
-
-  tab
-})
-
-all_hr <- bind_rows(hr_tables)
-
-
-
-hr_wide <- all_hr %>%
-  mutate(
-    HR_str = if_else(
-      HR == 1 & is.na(HR_lci),
-      "1.00 (ref)",
-      sprintf("%.2f (%.2f–%.2f)", HR, HR_lci, HR_uci)
-    ),
-    time_label = case_when(
-      time == 183  ~ "6 mo",
-      time == 365  ~ "1 yr",
-      time == 1096 ~ "3 yr",
-      time == 1826 ~ "5 yr",
-      time == 3653 ~ "10 yr"
-    )
-  ) %>%
-  select(model, subgroup, time_label, HR_str) %>%
-  pivot_wider(
-    names_from  = time_label,
-    values_from = HR_str
-  )
-
-hr_wide |> print(n = Inf)
-
-
-
-
-hr_final <- hr_table %>%
-  # 1) Rename the raw contrast column to a helper
-  rename(contrast_raw = Subgroup) %>%
-
-  # 2) Drop the unneeded “ref” rows for Overall & Sex
-  filter(
-    !(model == "Overall" & str_detect(`6 mo`, "ref")),
-    !(model == "Sex"     & str_detect(`6 mo`, "ref"))
-  ) %>%
-
-  # 3) Build a clean Subgroup label
-  mutate(
-    Subgroup = case_when(
-      # the one Overall row
-      model == "Overall" ~ "Overall",
-
-      # HPA count: “Control” → “No HPA”, others left as-is
-      model == "HPA count" & contrast_raw == "Control" ~ "No HPA",
-      model == "HPA count"                           ~ contrast_raw,
-
-      # Sex: pull out just “Men” or “Women”
-      model == "Sex" ~ str_extract(contrast_raw, "Men|Women"),
-
-      # Age: extract the number
-      model == "Age" ~ paste0("Age ", str_extract(contrast_raw, "\\d+")),
-
-      # Occupation: drop everything up to the “=”
-      model == "Occupation" ~ str_remove(contrast_raw, ".*="),
-
-      TRUE ~ contrast_raw
-    )
-  ) %>%
-
-  # 4) Drop the helper column
-  select(-contrast_raw) %>%
-
-  # 5) Force the exact row‐order you specified
-  mutate(
-    Subgroup = factor(Subgroup, levels = c(
-      "Overall",
-
-      "No HPA", "HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests",
-
-      "Men", "Women",
-
-      "Age 25", "Age 35", "Age 45", "Age 55", "Age 65",
-
-      "White-collar high-skilled", "White-collar low-skilled",
-      "Blue-collar high-skilled",  "Blue-collar low-skilled",
-      "Unknown"
-    ))
-  ) %>%
-  arrange(Subgroup)
-
-# View the final table:
-hr_final |> select(-model, Subgroup, everything()) |> print(n = Inf)
-```
-
-
-## RMST
-
-```{r}
-
-
-# # landmark times
-# t_rmst <- c(1826, 3653, 7306)      # 5 y, 10 y
-# 
-# # common options for every call --------------------------------
-# ci_meth <- "delta"           # "boot" if you ever need it
-# n_quad  <- 30                # 20-50 is plenty
-# 
-# # ───────────────── 1. Overall treated vs control ───────────────
-# tic("Δ-RMST overall")
-# s_rmst_overall <- fast_stand(
-#   fit        = fit_overall,
-#   data       = data_cvd,
-#   at         = list(list(treated = "Control"),
-#                     list(treated = "HPA")),
-#   t          = t_rmst,
-#   type       = "rmst",
-#   contrast   = "difference",
-#   ci         = TRUE,
-#   ci_method  = ci_meth,
-#   n_quad     = n_quad
-# )
-# toc()
-# 
-# # ───────────────── 2. By HPA count ─────────────────────────────
-# tic("Δ-RMST HPA count")
-# s_rmst_hpa <- fast_stand(
-#   fit  = fit_n_hpa,
-#   data = data_cvd,
-#   at   = list(
-#     list(n_tests_within_5_fac = "Control"),
-#     list(n_tests_within_5_fac = "HPA, 1 test"),
-#     list(n_tests_within_5_fac = "HPA, 2 tests"),
-#     list(n_tests_within_5_fac = "HPA, ≥3 tests")),
-#   t          = t_rmst,
-#   type       = "rmst",
-#   contrast   = "difference",
-#   ci         = TRUE,
-#   ci_method  = ci_meth,
-#   n_quad     = n_quad
-# )
-# toc()
-# 
-# # ───────────────── 3. By sex ───────────────────────────────────
-# tic("Δ-RMST sex")
-# s_rmst_sex <- fast_stand(
-#   fit  = fit_sex_int,
-#   data = data_cvd,
-#   at   = list(
-#     list(treated = "Control", Sex = "Men"),
-#     list(treated = "Control", Sex = "Women"),
-#     list(treated = "HPA",     Sex = "Men"),
-#     list(treated = "HPA",     Sex = "Women")),
-#   t          = t_rmst,
-#   type       = "rmst",
-#   contrast   = "difference",
-#   ci         = TRUE,
-#   ci_method  = ci_meth,
-#   n_quad     = n_quad
-# )
-# toc()
-# 
-# # ───────────────── 4. By age ───────────────────────────────────
-# # ages   <- c(25, 35, 45, 55, 65)
-# # at_age <- c(lapply(ages, \(a) list(treated = "Control", Age = a)),
-# #             lapply(ages, \(a) list(treated = "HPA",     Age = a)))
-# # 
-# # tic("Δ-RMST age")
-# # s_rmst_age <- fast_stand(
-# #   fit        = fit_age_int,
-# #   data       = data_cvd,
-# #   at         = at_age,
-# #   t          = t_rmst,
-# #   type       = "rmst",
-# #   contrast   = "difference",
-# #   ci         = TRUE,
-# #   ci_method  = ci_meth,
-# #   n_quad     = n_quad
-# # )
-# # toc()
-# 
-# # ───────────────── 4 ─ By age‑group (categorical) ───────────────
-# age_levels <- levels(data_cvd$age_group)
-# 
-# tic("Δ‑RMST age‑group")
-# 
-# s_rmst_agegrp <- purrr::map_dfr(age_levels, function(g) {
-# 
-#   fast_stand(
-#     fit   = fit_agegrp,
-#     data  = data_cvd,
-#     at    = list(
-#               list(treated = "Control", age_group = g),
-#               list(treated = "HPA",     age_group = g)),
-#     t          = t_rmst,             # your RMST horizon(s)
-#     type       = "rmst",
-#     contrast   = "difference",       # at2 – at1  (HPA − Control)
-#     ci         = TRUE,
-#     ci_method  = ci_meth,
-#     n_quad     = n_quad
-#   ) |>
-#     dplyr::mutate(age_group = g)     # tag the result with its stratum
-# })
-# 
-# toc()
-# 
-# 
-# 
-# # ───────────────── 5. By occupation ────────────────────────────
-# at_occ <- list(
-#   list(treated="Control", ssyk_WBHL_group="White-collar high-skilled"),
-#   list(treated="Control", ssyk_WBHL_group="White-collar low-skilled"),
-#   list(treated="Control", ssyk_WBHL_group="Blue-collar high-skilled"),
-#   list(treated="Control", ssyk_WBHL_group="Blue-collar low-skilled"),
-#   list(treated="Control", ssyk_WBHL_group="Unknown"),
-#   list(treated="HPA",     ssyk_WBHL_group="White-collar high-skilled"),
-#   list(treated="HPA",     ssyk_WBHL_group="White-collar low-skilled"),
-#   list(treated="HPA",     ssyk_WBHL_group="Blue-collar high-skilled"),
-#   list(treated="HPA",     ssyk_WBHL_group="Blue-collar low-skilled"),
-#   list(treated="HPA",     ssyk_WBHL_group="Unknown"))
-# 
-# tic("Δ-RMST occupation")
-# s_rmst_occ <- fast_stand(
-#   fit        = fit_occ_int,
-#   data       = data_cvd,
-#   at         = at_occ,
-#   t          = t_rmst,
-#   type       = "rmst",
-#   contrast   = "difference",
-#   ci         = TRUE,
-#   ci_method  = ci_meth,
-#   n_quad     = n_quad
-# )
-# toc()
-# 
-# # ───────────────── join everything (optional) ──────────────────
-# all_rmst <- dplyr::bind_rows(
-#   dplyr::bind_cols(model = "Overall",     s_rmst_overall),
-#   dplyr::bind_cols(model = "HPA count",   s_rmst_hpa),
-#   dplyr::bind_cols(model = "Sex",         s_rmst_sex),
-#   dplyr::bind_cols(model = "Age",         s_rmst_age),
-#   dplyr::bind_cols(model = "Occupation",  s_rmst_occ)
-# )
-# 
-# 
-
-
-
-```
-
-### only rmst for some contrasts
 
 ```{r}
 
@@ -1594,161 +580,3 @@ write_rds(
 ```
 
 
-
-### RMST table
-```{r}
-# 0. which two RMST times to keep?
-keep_times <- c(1826, 3653)
-
-# 1. collect your five standsurv outputs into a named list
-rmst_models <- list(
-  Overall     = s_rmst_overall,
-  `HPA count` = s_rmst_hpa,
-  Sex1         = lst_sex[[1]],
-  Sex2         = lst_sex[[2]],
-  Age1          = lst_age[[1]],
-  Age2         = lst_age[[2]],
-  Age3          = lst_age[[3]],
-  Age4          = lst_age[[4]],
-  Age5          = lst_age[[5]],
-  Occupation1  = lst_occ[[1]],
-  Occupation2  = lst_occ[[2]],
-  Occupation3  = lst_occ[[3]],
-  Occupation4  = lst_occ[[4]],
-  Occupation5  = lst_occ[[5]]
-)
-
-
-
-rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
-  # extract the contrast‐table
-  attr(fit_obj, "standpred_contrast") %>%
-    as_tibble() %>%
-    filter(time %in% keep_times) %>%
-    mutate(
-      Model    = model_name,
-      Subgroup = case_when(
-        contrast == "treated=HPA vs treated=Control"                                                                 ~ "Overall",
-        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"                                ~ "HPA, 1 test",
-        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control"                               ~ "HPA, 2 tests",
-        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"                              ~ "HPA, ≥3 tests",
-        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"                                               ~ "Men",
-        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"                                           ~ "Women",
-        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25"                                                 ~ "Age 25",
-        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35"                                                 ~ "Age 35",
-        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45"                                                 ~ "Age 45",
-        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55"                                                 ~ "Age 55",
-        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65"                                                 ~ "Age 65",
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled"
-                                                                                                                     ~ "White-collar high-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled"
-                                                                                                                     ~ "White-collar low-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled"
-                                                                                                                     ~ "Blue-collar high-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled"
-                                                                                                                     ~ "Blue-collar low-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Unknown vs treated=Control, ssyk_WBHL_group=Unknown"
-                                                                                                                     ~ "Unknown occupation",
-        TRUE                                                                                                          ~ NA_character_
-      ),
-      Time  = if_else(time == 1826, "5 yr", "10 yr"),
-      ΔRMST = sprintf("%.2f (%.2f–%.2f)",
-                      difference,
-                      difference_lci,
-                      difference_uci)
-    ) %>%
-    select(Model, Subgroup, Time, ΔRMST)
-})
-  
-rmst_wide <- rmst_table %>%
-  pivot_wider(
-    names_from  = Time,
-    values_from = ΔRMST
-  ) %>%
-  # optional: order the rows exactly as you listed
-  mutate(
-    Model = factor(Model,
-                   levels = c("Overall","HPA count","Sex","Age","Occupation")),
-    Subgroup = factor(Subgroup,
-                      levels = c(
-                        "Overall",
-                        "HPA, 1 test","HPA, 2 tests","HPA, ≥3 tests",
-                        "Men","Women",
-                        "Age 25","Age 35","Age 45","Age 55","Age 65",
-                        "White-collar high-skilled","White-collar low-skilled",
-                        "Blue-collar high-skilled","Blue-collar low-skilled",
-                        "Unknown occupation"
-                      ))
-  ) %>%
-  arrange(Model, Subgroup) |> 
-  select(-Model) |> 
-  # 1) rename the columns
-  rename(
-    `Group` = Subgroup,
-    `ΔRMST 5 yr`     = `5 yr`,
-    `ΔRMST 10 yr`    = `10 yr`
-  )
-
-# print your final table
-print(rmst_wide, n = Inf)
-
-
-```
-
-# without the use of a function
-
-```{r}
-
-
-# 1) COLLAPSE TO UNIQUE PATTERNS + WEIGHT
-covs <- c("treated","Sex","Age","birth_cohort",
-          "comorbidity","cvd_art_before_HPA_flag",
-          "IncomeLevel_CSFVI","ssyk_WBHL_group")
-uniq <- data_cvd %>% 
-  count(across(all_of(covs)), name="weights")
-
-# how many patterns?
-n_full <- nrow(data_cvd)
-n_uniq <- nrow(uniq)
-cat("Full rows:",n_full,"  unique patterns:",n_uniq,"\n")
-
-# 1) make sure your uniq table has treated as the *same* factor
-uniq2 <- uniq %>%                    # your 32 716 patterns
-  mutate(
-    treated  = factor(treated, levels = levels(data_cvd$treated)),
-    `(weights)` = weights                 # <- rename so standsurv sees it
-  )
-
-# 2) call standsurv() directly
-s_rmst <- standsurv(
-  object   = fit_overall,
-  newdata  = uniq2,
-  at       = list(
-    list(treated = "Control"),
-    list(treated = "HPA")
-  ),
-  t        = c(183, 365),
-  type     = "rmst",
-  contrast = "difference",
-  ci       = TRUE
-)
-
-s_hr <- standsurv(
-  object   = fit_overall,
-  newdata  = uniq2,
-  at       = list(
-    list(treated = "Control"),
-    list(treated = "HPA")
-  ),
-  t        = c(183, 365),
-  type     = "hazard",
-  contrast = "ratio",
-  ci       = TRUE
-)
-
-# these two objects now give you the marginal ΔRMST and HR at 6‐ and 12-month
-s_rmst
-s_hr
-
-
-```

@@ -4,6 +4,7 @@ format: html
 ---
 
 
+
 # Libraries
 ```{r}
 library(flexsurv)
@@ -450,86 +451,4 @@ abs_tbl
 ```
 
 
-```{r}
-library(survival)
-library(purrr)
-library(dplyr)
-
-
-
-library(broom)
-
-tidy_tbl <- imap_dfr(
-  fits,
-  ~ tidy(.x, exponentiate = TRUE, conf.int = TRUE) %>%
-      mutate(
-        model   = .y,        # "vo2", "bmi", …
-        n_obs   = .x$n,
-        n_event = .x$nevent
-      )
-)
-
-tidy_tbl |> print(n = 200)
-
-forest_df <- tidy_tbl %>% 
-  filter(str_detect(term, "treatedHPA:"))
-
-ggplot(forest_df,
-       aes(x = estimate, xmin = conf.low, xmax = conf.high,
-           y = term)) +
-  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey60") +
-  geom_pointrange(size = .35) +
-  scale_x_log10() +
-  facet_wrap(~ model, ncol = 1, scales = "free_y") +
-  labs(x = "Hazard ratio (log scale)",
-       y = NULL,
-       title = "Interaction: treated × exposure",
-       caption = "Point = HR, bar = 95 % CI") +
-  theme_minimal(base_size = 11)
-```
-
-```{r}
-library(marginaleffects)
-
-# 1. Specify the factor levels you want to contrast
-avg_cmp_bmi <- avg_comparisons(
-  fits$tests,                                         # coxph with treated*BMI_cat
-  variables = list(treated = c("Control", "HPA")),  # HPA ÷ Control
-  by        = "n_tests_within_5_fac_vs_ctrl",
-  transform = "exp"                            # HR instead of log‑HR
-)
-
-summary(avg_cmp_bmi)
-
-
-contrasts_tbl <- imap_dfr(
-  list(vo2 = "vo2_cat", bmi = "BMI_cat",
-       exer = "Exercise_cat", health = "Health_cat",
-       nHPAs = "n_tests_within_5_fac_vs_ctrl"),
-  ~ comparisons(
-      fits[[.y]],                                   # model
-      variables = list(treated = c("Control", "HPA")), # HPA - Control
-      by        = .x,                               # matching category var
-      transform = "exp"
-    ) %>%
-    mutate(model = .y)                              # tag with model name
-)
-
-
-
-contrasts_tbl %>% as_tibble() |> 
-  mutate(groups = coalesce(vo2_cat, BMI_cat, Exercise_cat, Health_cat, n_tests_within_5_fac_vs_ctrl)) |> 
-  ggplot(aes(x = estimate, xmin = conf.low, xmax = conf.high,
-             y = groups, colour = groups)) +
-  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey60") +
-  geom_pointrange() +
-  scale_x_log10() +
-  facet_wrap(~ model, ncol = 1, scales = "free_y") +
-  labs(x = "Hazard ratio (HPA vs Control)",
-       y = NULL,
-       title = "Treatment effect within exposure strata",
-       caption = "Points = HR, bars = 95 % CIs (delta method)") +
-  theme_minimal(base_size = 11) +
-  theme(legend.position = "none")
-```
 
