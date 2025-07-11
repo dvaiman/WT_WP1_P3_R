@@ -1,7 +1,23 @@
 ---
-title: "Untitled"
-format: html
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
+
+# Descriptioon
+
+This file prepares and structures a harmonized dataset that links matched registry data on patients treated (or not) with HPA (a hypothetical intervention) with national patient registers, death registers, and comorbidity indices. The goal is to construct time-to-event outcomes for cardiovascular disease (CVD) events post-HPA treatment for survival analysis.
 
 ```{r}
 library(tidyverse)
@@ -10,30 +26,63 @@ library(tidyverse)
 
 ```{r}
 # matched data from scb
-scb <- read_csv(here::here("..", "data", "scb_data_whole_sample_2025-02-21.csv"))
+scb <- read_csv(here::here(
+  "..",
+  "data",
+  "scb_data_whole_sample_2025-02-21.csv"
+))
 glimpse(scb)
 
 
-
 # HPI data from paper 1 in the work together project
-hpi <- read_csv( here::here("..", "data", "hpa_pop_one_time_point_clean_20240528.csv"))
+hpi <- read_csv(here::here(
+  "..",
+  "data",
+  "hpa_pop_one_time_point_clean_20240528.csv"
+))
 
 # data on treated (with HPA)
-treated <- read_csv( here::here("..", "data", "registeruttagdata_2025-01-16.csv"))
+treated <- read_csv(here::here(
+  "..",
+  "data",
+  "registeruttagdata_2025-01-16.csv"
+))
 
 # patient registers data , inpatient care
-patreg_inpat <- read_csv(here::here("..", "..", "..", "..",
-"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
-"data_socialstyrelsen", "data_clean", "patientreg", "inpatient_data_clean_2025-02-26.csv"))
+patreg_inpat <- read_csv(here::here(
+  "..",
+  "..",
+  "..",
+  "..",
+  "HPI (DNR XXXXXX)",
+  "Data HPI registeruttag 2025",
+  "data_socialstyrelsen",
+  "data_clean",
+  "patientreg",
+  "inpatient_data_clean_2025-02-26.csv"
+))
 
 
-deathreg <- read_csv(here::here("..", "..", "..", "..",
-"HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
-"data_socialstyrelsen", "data_clean", "dodsorsaksreg", "deathreg_data_clean_2025-02-26.csv"))
+deathreg <- read_csv(here::here(
+  "..",
+  "..",
+  "..",
+  "..",
+  "HPI (DNR XXXXXX)",
+  "Data HPI registeruttag 2025",
+  "data_socialstyrelsen",
+  "data_clean",
+  "dodsorsaksreg",
+  "deathreg_data_clean_2025-02-26.csv"
+))
 
 # comorbidity index data
 
-cci_index <- read_csv(here::here("..", "data", "charlson_comorbidity_index_results.csv"))
+cci_index <- read_csv(here::here(
+  "..",
+  "data",
+  "charlson_comorbidity_index_results.csv"
+))
 
 ```
 
@@ -49,12 +98,11 @@ Three point MACE: AMI: I21, I22; Stroke: I60–I69, G45 ; CV death https://www.s
 Atherosclerosis: I21, I25, I46, I63, I64, I65, I66
 
 ```{r}
-#df_dia |> filter(letter == "I")|>  arrange(number) |>  count(HDIA) 
-
+#df_dia |> filter(letter == "I")|>  arrange(number) |>  count(HDIA)
 
 df_dia <-
-patreg_inpat |> 
-  drop_na(indatum) |>  # 10 with NA in indatum
+  patreg_inpat |>
+  drop_na(indatum) |> # 10 with NA in indatum
   mutate(
     letter = str_extract(HDIA, "^[A-Z]+"),
     number = str_sub(HDIA, 2, 3) %>% as.numeric()
@@ -70,50 +118,54 @@ patreg_inpat |>
       letter == "I" & number >= 63 & number <= 66 ~ 1L,
       TRUE ~ 0L
     ),
-        cvd_broad = case_when(
+    cvd_broad = case_when(
       # i21–i25: ischemic heart disease (includes myocardial infarction)
       letter == "I" & number >= 21 & number <= 25 ~ 1L,
       # i46: cardiac arrest
       HDIA == "I46" ~ 1L,
       # i60–i66: stroke (e.g., subarachnoid hemorrhage, cerebral infarction)
       letter == "I" & number >= 60 & number <= 66 ~ 1L,
-      
+
       # The following could be included if a broader definition is desirerd:
-      letter == "I" & number == 20 ~ 1L,      # i20: angina pectoris
-      HDIA == "I50" ~ 1L,                     # i50: heart failure
-      HDIA == "I69" ~ 1L,                     # i69: late effects of stroke
-      letter == "I" & number >= 10 & number <= 15 ~ 1L,  # i10–i15: hypertension
-      
+      letter == "I" & number == 20 ~ 1L, # i20: angina pectoris
+      HDIA == "I50" ~ 1L, # i50: heart failure
+      HDIA == "I69" ~ 1L, # i69: late effects of stroke
+      letter == "I" & number >= 10 & number <= 15 ~ 1L, # i10–i15: hypertension
+
       TRUE ~ 0L
     )
-  ) |> 
+  ) |>
   # inner join for only keeping matches that appears in both datasets
   # data is yearly while patreg has a date for indatum
-  inner_join(scb |> select(LopNr, Year), join_by(LopNr)) |> 
+  inner_join(scb |> select(LopNr, Year), join_by(LopNr)) |>
   select(LopNr, AR, Year, indatum, HDIA, cvd_art, cvd_broad)
 
 
-
 df_dia_long <-
-df_dia |> 
-pivot_longer(
-  cols = c(cvd_art, cvd_broad),
-  names_to = "dia_type",
-  values_to = "flag") |> 
+  df_dia |>
+  pivot_longer(
+    cols = c(cvd_art, cvd_broad),
+    names_to = "dia_type",
+    values_to = "flag"
+  ) |>
   mutate(
-    diagnosis_relative_to_HPA = if_else(Year >= year(indatum), "before_HPA", "after_HPA")
-  ) |> 
+    diagnosis_relative_to_HPA = if_else(
+      Year >= year(indatum),
+      "before_HPA",
+      "after_HPA"
+    )
+  ) |>
 
   # only those with a diagnosis
-  filter(flag == 1) |> 
-    # as the analyses will be per year we remove duplicate within a year (indatum) and HDIA
-distinct(LopNr, dia_type, diagnosis_relative_to_HPA, .keep_all = TRUE) |> 
-# take the first and last dia
-  group_by(LopNr, dia_type, diagnosis_relative_to_HPA) |> 
+  filter(flag == 1) |>
+  # as the analyses will be per year we remove duplicate within a year (indatum) and HDIA
+  distinct(LopNr, dia_type, diagnosis_relative_to_HPA, .keep_all = TRUE) |>
+  # take the first and last dia
+  group_by(LopNr, dia_type, diagnosis_relative_to_HPA) |>
   filter(
     (diagnosis_relative_to_HPA == "after_HPA" & AR == min(AR)) |
-    (diagnosis_relative_to_HPA == "before_HPA" & AR == max(AR))
-  ) |> 
+      (diagnosis_relative_to_HPA == "before_HPA" & AR == max(AR))
+  ) |>
   ungroup()
 
 
@@ -125,16 +177,11 @@ df_dia_wide <- df_dia_long %>%
     names_glue = "{dia_type}_{diagnosis_relative_to_HPA}_{.value}"
   )
 
-
-df_dia_wide |> janitor::get_dupes(LopNr) |> arrange(desc(dupe_count)) |> print(n=100)
-
-
-
-
-
-
-
-
+# dupes check
+df_dia_wide |>
+  janitor::get_dupes(LopNr) |>
+  arrange(desc(dupe_count)) |>
+  print(n = 100)
 
 
 ```
@@ -144,11 +191,10 @@ df_dia_wide |> janitor::get_dupes(LopNr) |> arrange(desc(dupe_count)) |> print(n
 ```{r}
 
 d <-
-deathreg |> 
+  deathreg |>
   mutate(
-  death_cvd_all = as.numeric(str_detect(ULORSAK, "I")), 
-  death_cvd_art = case_when(
-
+    death_cvd_all = as.numeric(str_detect(ULORSAK, "I")),
+    death_cvd_art = case_when(
       ULORSAK == "I21" ~ 1L,
       ULORSAK == "I25" ~ 1L,
       ULORSAK == "I46" ~ 1L,
@@ -158,23 +204,27 @@ deathreg |>
       ULORSAK == "I66" ~ 1L,
       TRUE ~ 0L
     ),
-  .after = ULORSAK
-  ) |>  select(LopNr, DODSDAT, ULORSAK, death_cvd_all, death_cvd_art)
+    .after = ULORSAK
+  ) |>
+  select(LopNr, DODSDAT, ULORSAK, death_cvd_all, death_cvd_art)
 ```
 
 
 
 ```{r}
 joined <-
-scb |> 
-  left_join(hpi |> select(LopNr, Performed)) |> 
-  left_join(treated |> select(LopNr, treated)) |> 
-  left_join(df_dia_wide) |> 
-  left_join(cci_index |> select(group, CCIunw, CCIw), join_by(LopNr == group)) |> 
-  left_join(d) 
+  scb |>
+  left_join(hpi |> select(LopNr, Performed)) |>
+  left_join(treated |> select(LopNr, treated)) |>
+  left_join(df_dia_wide) |>
+  left_join(
+    cci_index |> select(group, CCIunw, CCIw),
+    join_by(LopNr == group)
+  ) |>
+  left_join(d)
 
-joined |> 
-count(treated)
+joined |>
+  count(treated)
 
 # checking that all is correct
 # joined |>
@@ -183,38 +233,20 @@ count(treated)
 #   mutate(cvd_art_after_year = year(cvd_art_after_HPA_indatum), .after = Year) |>
 #   filter(is.na(cvd_art_after_HPA_indatum) & cvd_art_after_HPA_flag == 1) |> print(n=100)
 
-
-# joined |> 
+# joined |>
 #   #time vars
-#   select(LopNr, Year, Performed, cvd_art_before_HPA_indatum, cvd_art_after_HPA_indatum, cvd_art_after_HPA_flag,cvd_art_before_HPA_flag,  death_cvd_art, death_cvd_all) |> 
-#   mutate(cvd_art_after_year = year(cvd_art_after_HPA_indatum), .after = Year) |> 
+#   select(LopNr, Year, Performed, cvd_art_before_HPA_indatum, cvd_art_after_HPA_indatum, cvd_art_after_HPA_flag,cvd_art_before_HPA_flag,  death_cvd_art, death_cvd_all) |>
+#   mutate(cvd_art_after_year = year(cvd_art_after_HPA_indatum), .after = Year) |>
 #   filter(Year == cvd_art_after_year) |> print(n=100)
-# 
-# 
+#
+#
 # joined |> count(cvd_art_after_HPA_flag)
 ```
 
 
 # Risk time
 
-	•	cvd_broad_after_HPA_flag:
-An indicator flag (0/1) for a broad cardiovascular disease event occurring after the HPA date.
-	•	cvd_art_after_HPA_flag:
-An indicator flag (0/1) for a narrow cardiovascular event (e.g., arteriosclerosis) occurring after the HPA date.
-	•	HPA_date:
-The starting date for survival follow-up. For treated individuals, this is taken from the Performed date; otherwise, a constructed date using the Year (formatted as “Year-06-15”).
-	•	censor_date:
-The censoring date for survival analysis, set as the earlier of (HPA_date + 5 years) and a fixed cutoff (2024-06-05).
-	•	event_art:
-The event date for the narrow cardiovascular outcome, taken from cvd_art_after_HPA_indatum.
-	•	risk_end_art:
-The effective end date for follow-up regarding the narrow outcome, defined as the minimum of the event date (event_art), date of death (DODSDAT), and censor_date.
-	•	risk_time_art:
-The time interval (in days) from HPA_date to risk_end_art, representing the observed follow-up time for the narrow outcome.
-	•	risk_art_flag:
-An event indicator for the narrow outcome. It is set to the value of cvd_art_after_HPA_flag if risk_end_art occurs before the censoring date; otherwise, it is set to 0.
-	•	event_broad, risk_end_broad, risk_time_broad:
-Analogous to the above, these variables are defined for the broad cardiovascular outcome using cvd_broad_after_HPA_indatum as the event date.
+
 
 ```{r}
 # write_csv(joined, here::here("..", "data", "df_interim_2025-03-05.csv"))
@@ -222,183 +254,238 @@ Analogous to the above, these variables are defined for the broad cardiovascular
 ```
 
 
-risk time same year and (removing first year) 
+risk time same year and (removing first year)
     LopNr risk_time_art event_art  Year risk_end_art risk_art_flag cvd_art_after_HPA_flag censor_date
-    <dbl>         <dbl> <date>    <dbl> <date>               <dbl>                  <dbl> <date>     
-1    3744        -10183 NA         2019 1991-05-29               0                      0 2024-04-15 
-2 5482192             0 NA         2017 2017-06-15               0                      0 2022-06-15 
+    <dbl>         <dbl> <date>    <dbl> <date>               <dbl>                  <dbl> <date>
+1    3744        -10183 NA         2019 1991-05-29               0                      0 2024-04-15
+2 5482192             0 NA         2017 2017-06-15               0                      0 2022-06-15
 
-  mutate(
-    event_art = cvd_art_after_HPA_indatum,
-    risk_end_art = pmin(event_art, DODSDAT, censor_date, na.rm = TRUE),
-    risk_time_art = as.numeric(difftime(risk_end_art, HPA_date, units = "days")),
-    risk_art_flag = if_else(risk_end_art < censor_date, 1, 0)
-  )
-  
-  everyone need an end date
-  
-  either it is 5 years after HPA or the date the HPA was performed for controlls
-  
-  
+
+
+## Defines time-to-event variables for different CVD outcomes:
+- risk_end_*: minimum of event date, death, or censor date
+- risk_time_*: follow-up time in days from HPA
+- risk_flag_*: event indicator censor date
+
+
 
 ```{r}
 
-joined2 <- 
-  joined |>  
-   mutate(
-     # recode NA to 0
-    across(c(CCIunw, CCIw,cvd_broad_after_HPA_flag, cvd_art_after_HPA_flag, cvd_art_before_HPA_flag), ~ if_else(is.na(.), 0, .))) |> 
+joined2 <-
+  joined |>
+  mutate(
+    # recode NA to 0
+    across(
+      c(
+        CCIunw,
+        CCIw,
+        cvd_broad_after_HPA_flag,
+        cvd_art_after_HPA_flag,
+        cvd_art_before_HPA_flag
+      ),
+      ~ if_else(is.na(.), 0, .)
+    )
+  ) |>
   # creating same date on HPA and control
-    group_by(id_cluster) |> 
+  group_by(id_cluster) |>
   mutate(
     HPA_date = case_when(
-    treated == 0 ~ first(as.Date(Performed)[treated == 1]),
-    treated == 1 ~ as.Date(Performed)
-  )) |> 
+      treated == 0 ~ first(as.Date(Performed)[treated == 1]),
+      treated == 1 ~ as.Date(Performed)
+    )
+  ) |>
   ungroup() |>
   mutate(
     # protecting against leap year with rollover
     censor_date = pmin(HPA_date + days(1826), as.Date("2024-06-05")),
-    
-      # 10 yr restricted followup time
-    risk_end_art = pmin(cvd_art_after_HPA_indatum, DODSDAT, censor_date, na.rm = TRUE),
-    risk_time_art = as.numeric(difftime(risk_end_art, HPA_date, units = "days")),
-    risk_art_flag = if_else(!is.na(risk_end_art) & risk_end_art < censor_date,
-                        cvd_art_after_HPA_flag,
-                        0),
-   
-       # protecting against leap year with rollover
-    censor_date_10yrs = pmin(HPA_date + days(3652), as.Date("2024-06-05")),
-    
-    # 10 yr restricted followup time
-    risk_end_art_10yrs = pmin(cvd_art_after_HPA_indatum, DODSDAT, censor_date_10yrs, na.rm = TRUE),
-    risk_time_art_10yrs = as.numeric(difftime(risk_end_art_10yrs, HPA_date, units = "days")),
-   risk_art_flag_10yrs = if_else(
-  !is.na(risk_end_art_10yrs) & risk_end_art_10yrs < censor_date_10yrs,
-  cvd_art_after_HPA_flag,
-  0
-),
-   # unrestricted follow-up time
-   risk_end_art_unrestricted = pmin(cvd_art_after_HPA_indatum, DODSDAT, as.Date("2024-06-05"), na.rm = TRUE),
-risk_time_art_unrestricted = as.numeric(difftime(risk_end_art_unrestricted, HPA_date, units = "days")),
-risk_art_flag_unrestricted = if_else(
-  !is.na(risk_end_art_unrestricted) & risk_end_art_unrestricted < as.Date("2024-06-05"),
-  cvd_art_after_HPA_flag,
-  0
-),
 
-# age as time sclae
-DateOfBirth = as.Date(paste0(FodelseAr, "-07-01")),
-age_enter = as.numeric(difftime(HPA_date, DateOfBirth, units = "days")) / 365.25,
-age_exit  = as.numeric(difftime(risk_end_art, DateOfBirth, units = "days")) / 365.25
-  ) |> 
+    # 10 yr restricted followup time
+    risk_end_art = pmin(
+      cvd_art_after_HPA_indatum,
+      DODSDAT,
+      censor_date,
+      na.rm = TRUE
+    ),
+    risk_time_art = as.numeric(difftime(
+      risk_end_art,
+      HPA_date,
+      units = "days"
+    )),
+    risk_art_flag = if_else(
+      !is.na(risk_end_art) & risk_end_art < censor_date,
+      cvd_art_after_HPA_flag,
+      0
+    ),
+
+    # protecting against leap year with rollover
+    censor_date_10yrs = pmin(HPA_date + days(3652), as.Date("2024-06-05")),
+
+    # 10 yr restricted followup time
+    risk_end_art_10yrs = pmin(
+      cvd_art_after_HPA_indatum,
+      DODSDAT,
+      censor_date_10yrs,
+      na.rm = TRUE
+    ),
+    risk_time_art_10yrs = as.numeric(difftime(
+      risk_end_art_10yrs,
+      HPA_date,
+      units = "days"
+    )),
+    risk_art_flag_10yrs = if_else(
+      !is.na(risk_end_art_10yrs) & risk_end_art_10yrs < censor_date_10yrs,
+      cvd_art_after_HPA_flag,
+      0
+    ),
+    # unrestricted follow-up time
+    risk_end_art_unrestricted = pmin(
+      cvd_art_after_HPA_indatum,
+      DODSDAT,
+      as.Date("2024-06-05"),
+      na.rm = TRUE
+    ),
+    risk_time_art_unrestricted = as.numeric(difftime(
+      risk_end_art_unrestricted,
+      HPA_date,
+      units = "days"
+    )),
+    risk_art_flag_unrestricted = if_else(
+      !is.na(risk_end_art_unrestricted) &
+        risk_end_art_unrestricted < as.Date("2024-06-05"),
+      cvd_art_after_HPA_flag,
+      0
+    ),
+
+    # age as time sclae
+    DateOfBirth = as.Date(paste0(FodelseAr, "-07-01")),
+    age_enter = as.numeric(difftime(HPA_date, DateOfBirth, units = "days")) /
+      365.25,
+    age_exit = as.numeric(difftime(risk_end_art, DateOfBirth, units = "days")) /
+      365.25
+  ) |>
   # 5482192 (a control) and cluster id 366305 died same year and date as the register information making the risk time 0
   # 3744 and cluster id 398322 has risktime -10183, died 1991 and did HPA 2019
   # removing the whole propensity score matched cluster
-  filter(id_cluster != 366305, id_cluster != 398322) |> 
-    ## ── follow-up that starts 1 y after the HPA (‘left-truncation’) ──
+  filter(id_cluster != 366305, id_cluster != 398322) |>
+  ## ── follow-up that starts 1 y after the HPA (‘left-truncation’) ──
   mutate(
-    risk_start_1y  = HPA_date + days(365L),  # 1 year after HPA date
+    risk_start_1y = HPA_date + days(365L), # 1 year after HPA date
 
-    admin_censor   = as.Date("2024-06-05"),
+    admin_censor = as.Date("2024-06-05"),
 
-    censor_date_1y = pmin(risk_start_1y + years(10),   # ≤10 y of follow-up
-                          DODSDAT, admin_censor,
-                          na.rm = TRUE),
+    censor_date_1y = pmin(
+      risk_start_1y + years(10), # ≤10 y of follow-up
+      DODSDAT,
+      admin_censor,
+      na.rm = TRUE
+    ),
 
     # event indicator only **after** the wash-out window
-    event_post1y   = cvd_art_after_HPA_flag == 1 &
-                     cvd_art_after_HPA_indatum >  risk_start_1y &
-                     cvd_art_after_HPA_indatum <= censor_date_1y,
+    event_post1y = cvd_art_after_HPA_flag == 1 &
+      cvd_art_after_HPA_indatum > risk_start_1y &
+      cvd_art_after_HPA_indatum <= censor_date_1y,
 
-    risk_end_art_1y =
-      if_else(event_post1y,
-              cvd_art_after_HPA_indatum,
-              censor_date_1y),
+    risk_end_art_1y = if_else(
+      event_post1y,
+      cvd_art_after_HPA_indatum,
+      censor_date_1y
+    ),
 
-    risk_time_art_1y =
-      pmax(as.double(risk_end_art_1y - risk_start_1y), 0),
+    risk_time_art_1y = pmax(as.double(risk_end_art_1y - risk_start_1y), 0),
 
     # bookkeeping flag: did the event occur inside the first year?
-    early_event_0_1y =
-      cvd_art_after_HPA_flag == 1 &
+    early_event_0_1y = cvd_art_after_HPA_flag == 1 &
       cvd_art_after_HPA_indatum <= risk_start_1y,
-    
-    tstart_1y =  as.numeric(risk_start_1y - HPA_date),        # always 365
-    tstop_1y  =  tstart_1y + risk_time_art_1y                 # 365 + follow-up
+
+    tstart_1y = as.numeric(risk_start_1y - HPA_date), # always 365
+    tstop_1y = tstart_1y + risk_time_art_1y # 365 + follow-up
   )
 
 
-joined2 |> 
-    filter(
-    risk_time_art_10yrs <= 365,             # left the cohort ≤ 1 y after HPA
-    tstop_1y          >  tstart_1y          # but have > 0 d after the landmark
+joined2 |>
+  filter(
+    risk_time_art_10yrs <= 365, # left the cohort ≤ 1 y after HPA
+    tstop_1y > tstart_1y # but have > 0 d after the landmark
     # equivalently: risk_time_art_1y > 0
   )
 
-joined2 %>% 
-  filter(tstop_1y <= tstart_1y) |> 
-  select(early_event_0_1y, treated, risk_start_1y, risk_end_art_1y, event_post1y, risk_time_art_1y, tstart_1y, tstop_1y) 
+joined2 %>%
+  filter(tstop_1y <= tstart_1y) |>
+  select(
+    early_event_0_1y,
+    treated,
+    risk_start_1y,
+    risk_end_art_1y,
+    event_post1y,
+    risk_time_art_1y,
+    tstart_1y,
+    tstop_1y
+  )
 
 # example of how to remove first year o events and its controls
 coxph(
-  Surv(tstart_1y, tstop_1y, event_post1y) ~ treated +  Age + Sex + cvd_art_before_HPA_flag,
+  Surv(tstart_1y, tstop_1y, event_post1y) ~
+    treated + Age + Sex + cvd_art_before_HPA_flag,
   data = joined2 %>%
-  mutate(
-    tstart_1y =  as.numeric(risk_start_1y - HPA_date),        # always 365
-    tstop_1y  =  tstart_1y + risk_time_art_1y                 # 365 + follow-up
-  ) |> 
-  filter(tstop_1y > tstart_1y) |> # only keep those with follow-up time > 0
-    group_by(id_cluster) %>% 
-          mutate(n_cluster = n()) %>% 
-          ungroup() %>% 
-          filter(n_cluster > 4) 
-) |> 
+    mutate(
+      tstart_1y = as.numeric(risk_start_1y - HPA_date), # always 365
+      tstop_1y = tstart_1y + risk_time_art_1y # 365 + follow-up
+    ) |>
+    filter(tstop_1y > tstart_1y) |> # only keep those with follow-up time > 0
+    group_by(id_cluster) %>%
+    mutate(n_cluster = n()) %>%
+    ungroup() %>%
+    filter(n_cluster > 4)
+) |>
   tidy(exponentiate = TRUE, conf.int = TRUE, p.value = TRUE)
 
 coxph(
-  Surv(risk_time_art_1y, event_post1y) ~
-    treated,
+  Surv(risk_time_art_1y, event_post1y) ~ treated,
   data = joined2
-) |> tidy(exponentiate = TRUE, conf.int = TRUE, p.value = TRUE) 
+) |>
+  tidy(exponentiate = TRUE, conf.int = TRUE, p.value = TRUE)
 
 coxph(
   Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated, # + birth_cohort + Age + Sex + comorbidity + cvd_art_before_HPA_flag,
   data = joined2
-) |> tidy(exponentiate = TRUE, conf.int = TRUE, p.value = TRUE) 
-
-joined2 |> select(risk_start_1y, risk_end_art_1y, event_post1y, risk_end_art_10yrs, risk_time_art)
-
-
-joined2 |> select(LopNr, Year, Performed, treated, id_cluster, risk_time_art, risk_time_art_10yrs, risk_time_art_unrestricted, risk_art_flag, risk_art_flag_10yrs, risk_art_flag_unrestricted, FodelseAr, age_enter, age_exit, Age) |> view()
+) |>
+  tidy(exponentiate = TRUE, conf.int = TRUE, p.value = TRUE)
 
 joined2 |>
-select(FodelseAr, HPA_date, risk_end_art, age_enter, age_exit, Age) 
+  select(
+    risk_start_1y,
+    risk_end_art_1y,
+    event_post1y,
+    risk_end_art_10yrs,
+    risk_time_art
+  )
+
+
+joined2 |>
+  select(
+    LopNr,
+    Year,
+    Performed,
+    treated,
+    id_cluster,
+    risk_time_art,
+    risk_time_art_10yrs,
+    risk_time_art_unrestricted,
+    risk_art_flag,
+    risk_art_flag_10yrs,
+    risk_art_flag_unrestricted,
+    FodelseAr,
+    age_enter,
+    age_exit,
+    Age
+  ) |>
+  view()
+
+joined2 |>
+  select(FodelseAr, HPA_date, risk_end_art, age_enter, age_exit, Age)
 ```
 
 # Save data
 ```{r}
 write_csv(joined2, here::here("..", "data", "df_paper_3_CVD_2025-03-05.csv"))
 ```
-
-
-```{r}
-glm(cvd_broad_after_HPA_flag ~ treated * as.character(CCIw), data = joined, family = binomial(link = "logit")) |> broom::tidy()
-```
-
-```{r}
-library(sjPlot)
-
-# Fit the model, converting CCIw to a factor if you want discrete levels
-model <- glm(cvd_broad_after_HPA_flag ~ treated + CCIw,
-             data = joined |> mutate(CCIw = as.factor(CCIw)),
-             family = binomial(link = "logit"))
-
-broom::tidy(model, exponentiate = TRUE, conf.int = TRUE)
-
-# Visualize the predicted probabilities with the interaction
-plot_model(model,
-           type = "pred",
-           terms = c("CCIw", "treated"))
-```
-

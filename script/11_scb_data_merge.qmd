@@ -1,11 +1,48 @@
 ---
-title: "Untitled"
-format: html
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
 
 
+
+# Description:
+This script links year-specific SCB datasets (1995–2021) to a base dataset of
+propensity score–matched individuals, separately for non-HPI and HPI participants.
+It uses ID (LopNr) and Year to extract relevant rows, merges all years into
+two unified datasets (HPI and non-HPI), combines them, removes duplicates based
+on completeness, and saves the cleaned dataset for further analysis.
+
+## Key steps:
+1. Load matched base data and filter to non-HPI (treated == 0) or HPI (treated == 1).
+2. Iterate through 26 yearly SCB datasets and extract matching rows by ID and year.
+3. Combine yearly data into two datasets: one for HPI and one for non-HPI.
+4. Bind both datasets together.
+5. Identify and remove duplicate IDs, keeping the most complete row per ID.
+6. Save the final dataset to disk for downstream analyses.
+
+## Output:
+- A cleaned SCB dataset (`scb_data_whole_sample_2025-02-21.csv`) with 2,091,430 rows,
+  reflecting the 1:4 matched sample.
+
+
+# Libraries
+
 ```{r}
-library(tidyverse)
+library(tidyverse) # For data wrangling (read_csv, mutate, filter, map_dfr, etc.)
+library(here) # For constructing platform-independent file paths
+library(janitor) # For duplicate detection (get_dupes)
 ```
 
 
@@ -19,36 +56,48 @@ We integrated 26 datasets from Statistics Sweden with our propensity score–mat
 
 ```{r}
 
-
 main_data <- read_csv(
-  here::here("..", "data", "registeruttagdata_2025-01-16.csv"), 
+  here::here("..", "data", "registeruttagdata_2025-01-16.csv"),
   col_types = cols(.default = col_character())
 ) |>
   mutate(
     LopNr = str_trim(LopNr),
-    Year  = str_trim(Year)
+    Year = str_trim(Year)
   ) |>
   filter(treated == "0") |>
   select(LopNr, Year)
 
 years <- 1995:2021
 
-combined_extracted <- map_dfr(years, ~ {
-  file_name <- paste0("without_HPI_data_categories", .x, ".csv")
-  file_path <- here::here("..", "..", "..", "..", "HPI (DNR XXXXXX)",
-                          "Data HPI registeruttag 2023", "SCB", "Leverans",
-                          "Leverans_20240306", "without_hpi_lopnr", "2.filtered", file_name)
-  
-   message("Reading file: ", file_name)
-  
-  read_csv(file_path, col_types = cols(.default = col_character())) |>
-    mutate(
-      LopNr = str_trim(LopNr),
-      Year  = str_trim(Year)
-    ) |>
-    semi_join(main_data, by = c("LopNr", "Year"))
-})
+combined_extracted <- map_dfr(
+  years,
+  ~ {
+    file_name <- paste0("without_HPI_data_categories", .x, ".csv")
+    file_path <- here::here(
+      "..",
+      "..",
+      "..",
+      "..",
+      "HPI (DNR XXXXXX)",
+      "Data HPI registeruttag 2023",
+      "SCB",
+      "Leverans",
+      "Leverans_20240306",
+      "without_hpi_lopnr",
+      "2.filtered",
+      file_name
+    )
 
+    message("Reading file: ", file_name)
+
+    read_csv(file_path, col_types = cols(.default = col_character())) |>
+      mutate(
+        LopNr = str_trim(LopNr),
+        Year = str_trim(Year)
+      ) |>
+      semi_join(main_data, by = c("LopNr", "Year"))
+  }
+)
 
 
 ```
@@ -59,33 +108,47 @@ We integrated 26 datasets from Statistics Sweden with our propensity score–mat
 
 ```{r}
 main_data <- read_csv(
-  here::here("..", "data", "registeruttagdata_2025-01-16.csv"), 
+  here::here("..", "data", "registeruttagdata_2025-01-16.csv"),
   col_types = cols(.default = col_character())
 ) |>
   mutate(
     LopNr = str_trim(LopNr),
-    Year  = str_trim(Year)
+    Year = str_trim(Year)
   ) |>
   filter(treated == "1") |> # with hpi
   select(LopNr, Year)
 
 years <- 1995:2021
 
-combined_extracted_hpi <- map_dfr(years, ~ {
-  file_name <- paste0("with_HPI_data_categories", .x, ".csv")
-  file_path <- here::here("..", "..", "..", "..", "HPI (DNR XXXXXX)",
-                          "Data HPI registeruttag 2023", "SCB", "Leverans",
-                          "Leverans_20240306", "with_hpi_lopnr", "2.filtered", file_name)
-  
-   message("Reading file: ", file_name)
-  
-  read_csv(file_path, col_types = cols(.default = col_character())) |>
-    mutate(
-      LopNr = str_trim(LopNr),
-      Year  = str_trim(Year)
-    ) |>
-    semi_join(main_data, by = c("LopNr", "Year"))
-})
+combined_extracted_hpi <- map_dfr(
+  years,
+  ~ {
+    file_name <- paste0("with_HPI_data_categories", .x, ".csv")
+    file_path <- here::here(
+      "..",
+      "..",
+      "..",
+      "..",
+      "HPI (DNR XXXXXX)",
+      "Data HPI registeruttag 2023",
+      "SCB",
+      "Leverans",
+      "Leverans_20240306",
+      "with_hpi_lopnr",
+      "2.filtered",
+      file_name
+    )
+
+    message("Reading file: ", file_name)
+
+    read_csv(file_path, col_types = cols(.default = col_character())) |>
+      mutate(
+        LopNr = str_trim(LopNr),
+        Year = str_trim(Year)
+      ) |>
+      semi_join(main_data, by = c("LopNr", "Year"))
+  }
+)
 
 ```
 
@@ -98,42 +161,51 @@ Bind hpi and without hpi data together
 ```{r}
 
 combcombined <-
-bind_rows(
-  combined_extracted,
-  combined_extracted_hpi
-) |> 
-  
-```
+  bind_rows(
+    combined_extracted,
+    combined_extracted_hpi
+  ) |>
+
+  ``
+`
 
 
 
 
-25 row ids has duplicates in the newly created df with id numbers from scb
-```{r}
+    25 row ids has duplicates in the newly created df with id numbers from scb
+    `
+``
+{
+  r
+}
 
 df <- read_csv(here::here("..", "data", "registeruttagdata_2025-01-16.csv")) # no dupes
 
-combcombined |> janitor::get_dupes(LopNr) |> distinct(LopNr, .keep_all = TRUE) |> summarise(sum(dupe_count))
+combcombined |>
+  janitor::get_dupes(LopNr) |>
+  distinct(LopNr, .keep_all = TRUE) |>
+  summarise(sum(dupe_count))
 # 37 dupes - 12 explicit id numbers = 25 diff
-nrow(df) - nrow(combcombined) 
+nrow(df) - nrow(combcombined)
 # 25 diff between dataset rows
 ```
 
 # Removing dupes
 ```{r}
-combcombined <- 
-  combcombined |> 
-  mutate(non_missing_count = rowSums(across(everything(), ~ !is.na(.)))) |> 
-  group_by(LopNr) |> 
-  slice_max(non_missing_count, with_ties = FALSE) |> 
-  ungroup() |> 
+combcombined <-
+  combcombined |>
+  mutate(non_missing_count = rowSums(across(everything(), ~ !is.na(.)))) |>
+  group_by(LopNr) |>
+  slice_max(non_missing_count, with_ties = FALSE) |>
+  ungroup() |>
   select(-non_missing_count)
 ```
 
 
 # Save scb data with 2.091.430 rows, a 1:4 match
 ```{r}
-write_csv(combcombined, here::here("..", "data", "scb_data_whole_sample_2025-02-21.csv"))
+write_csv(
+  combcombined,
+  here::here("..", "data", "scb_data_whole_sample_2025-02-21.csv")
+)
 ```
-
-

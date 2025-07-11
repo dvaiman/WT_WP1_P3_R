@@ -1,8 +1,23 @@
 ---
-title: "Untitled"
-format: html
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
 
+# Description
+
+HR plots over follow-up period.
 
 ```{r}
 library(tidyverse)
@@ -11,128 +26,191 @@ library(tidyverse)
 
 ```{r}
 hr_models <-
-read_rds(
-    here::here("..", "results", "predictions",
-             "marginal_hazard_ratio_unrestricted_time_points.RDS")
-)
+  read_rds(
+    here::here(
+      "..",
+      "results",
+      "predictions",
+      "marginal_hazard_ratio_unrestricted_time_points.RDS"
+    )
+  )
 
-hr_models$Sex1  |>  attributes()
+
+s_hr_hpa |> attributes()
+
+hr_models$Sex1 |> attributes()
+
+hr_models$`HPA count` |> attributes()
 ```
 
 ```{r}
 
-hr_models$Age1  <- NULL
-hr_models$Age2  <- NULL
-hr_models$Age3  <- NULL
-hr_models$Age4  <- NULL
-hr_models$Age5  <- NULL
+hr_models$Age1 <- NULL
+hr_models$Age2 <- NULL
+hr_models$Age3 <- NULL
+hr_models$Age4 <- NULL
+hr_models$Age5 <- NULL
+hr_models$`HPA count` <- NULL
 
-hr_models$AgeGroup1 |> attr("standpred_contrast") |> print(n=100)
+hr_models$AgeGroup1 |> attr("standpred_contrast") |> print(n = 100)
+
+hr_models$HPA_3_tests |> attr("standpred_contrast") |> print(n = 100)
+
+hr_models$AgeGroup2 |> attr("standpred_contrast") |> print(n = 100)
 
 
 hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
   # extract the contrast‐table
   attr(fit_obj, "standpred_contrast") %>%
     as_tibble() %>%
-   # filter(time %in% keep_times) %>%
+    # filter(time %in% keep_times) %>%
     mutate(
-      Model    = model_name,
+      Model = model_name,
       Subgroup = case_when(
-        contrast == "treated=HPA vs treated=Control"                                                                 ~ "Overall",
-        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"                                ~ "HPA, 1 test",
-        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control"                               ~ "HPA, 2 tests",
-        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"                              ~ "HPA, ≥3 tests",
-        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"                                               ~ "Men",
-        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"                                           ~ "Women",
-        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25"                                                 ~ "Age 25",
-        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35"                                                 ~ "Age 35",
-        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45"                                                 ~ "Age 45",
-        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55"                                                 ~ "Age 55",
-        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65"                                                 ~ "Age 65",
-        contrast == "treated=HPA, age_group=<35 vs treated=Control, age_group=<35"                                   ~ "Age 18–34",
-        contrast == "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49"                               ~ "Age 35–49",
-        contrast == "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50"                                   ~ "Age ≥50",
-                                                                                                                    
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled"
-                                                                                                                     ~ "White-collar high-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled"
-                                                                                                                     ~ "White-collar low-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled"
-                                                                                                                     ~ "Blue-collar high-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled"
-                                                                                                                     ~ "Blue-collar low-skilled",
-        contrast == "treated=HPA, ssyk_WBHL_group=Unknown vs treated=Control, ssyk_WBHL_group=Unknown"
-                                                                                                                     ~ "Unknown occupation",
-        TRUE                                                                                                          ~ NA_character_
+        contrast == "treated=HPA vs treated=Control" ~ "Overall",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 1 test vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 1 test" ~
+          "HPA, 1 test",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests" ~
+          "HPA, 2 tests",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests" ~
+          "HPA, ≥3 tests",
+        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men" ~ "Men",
+        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women" ~
+          "Women",
+        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25" ~ "Age 25",
+        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35" ~ "Age 35",
+        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45" ~ "Age 45",
+        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55" ~ "Age 55",
+        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65" ~ "Age 65",
+        contrast ==
+          "treated=HPA, age_group=<35 vs treated=Control, age_group=<35" ~
+          "Age 18–34",
+        contrast ==
+          "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49" ~
+          "Age 35–49",
+        contrast ==
+          "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50" ~
+          "Age ≥50",
+
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled" ~
+          "White-collar high-skilled",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled" ~
+          "White-collar low-skilled",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled" ~
+          "Blue-collar high-skilled",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled" ~
+          "Blue-collar low-skilled",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Unknown vs treated=Control, ssyk_WBHL_group=Unknown" ~
+          "Unknown occupation",
+        TRUE ~ NA_character_
       ),
-            Group = case_when(
-        contrast == "treated=HPA vs treated=Control"                                                                 ~ "Overall",
-        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"                                ~ "HPA count",
-        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control"                               ~ "HPA count",
-        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"                              ~ "HPA count",
-        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"                                               ~ "Sex",
-        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"                                           ~ "Sex",
-        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25"                                                 ~ "Age",
-        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35"                                                 ~ "Age",
-        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45"                                                 ~ "Age",
-        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55"                                                 ~ "Age",
-        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65"                                                 ~ "Age",
-        contrast == "treated=HPA, age_group=<35 vs treated=Control, age_group=<35"                                   ~ "Age grp",
-        contrast == "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49"                               ~ "Age grp",
-        contrast == "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50"                                   ~ "Age grp",
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled"
-                                                                                                                     ~ "Occupation",
-        contrast == "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled"
-                                                                                                                     ~ "Occupation",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled"
-                                                                                                                     ~ "Occupation",
-        contrast == "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled"
-                                                                                                                     ~ "Occupation",
-        contrast == "treated=HPA, ssyk_WBHL_group=Unknown vs treated=Control, ssyk_WBHL_group=Unknown"
-                                                                                                                     ~ "Unknown occupation",
-        TRUE                                                                                                          ~ NA_character_
-      ))#,
-    #   Time  = if_else(time == 1826, "5 yr", "10 yr"),
-    #   ΔRMST = sprintf("%.2f (%.2f–%.2f)",
-    #                   difference,
-    #                   difference_lci,
-    #                   difference_uci)
-    # ) %>%
-    # select(Model, Subgroup, Time, ΔRMST)
+      Group = case_when(
+        contrast == "treated=HPA vs treated=Control" ~ "Overall",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 1 test vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 1 test" ~
+          "HPA count",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests" ~
+          "HPA count",
+        contrast ==
+          "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests" ~
+          "HPA count",
+        contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men" ~ "Sex",
+        contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women" ~
+          "Sex",
+        contrast == "treated=HPA, Age=25 vs treated=Control, Age=25" ~ "Age",
+        contrast == "treated=HPA, Age=35 vs treated=Control, Age=35" ~ "Age",
+        contrast == "treated=HPA, Age=45 vs treated=Control, Age=45" ~ "Age",
+        contrast == "treated=HPA, Age=55 vs treated=Control, Age=55" ~ "Age",
+        contrast == "treated=HPA, Age=65 vs treated=Control, Age=65" ~ "Age",
+        contrast ==
+          "treated=HPA, age_group=<35 vs treated=Control, age_group=<35" ~
+          "Age grp",
+        contrast ==
+          "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49" ~
+          "Age grp",
+        contrast ==
+          "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50" ~
+          "Age grp",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled" ~
+          "Occupation",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=White-collar low-skilled vs treated=Control, ssyk_WBHL_group=White-collar low-skilled" ~
+          "Occupation",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Blue-collar high-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar high-skilled" ~
+          "Occupation",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Blue-collar low-skilled vs treated=Control, ssyk_WBHL_group=Blue-collar low-skilled" ~
+          "Occupation",
+        contrast ==
+          "treated=HPA, ssyk_WBHL_group=Unknown vs treated=Control, ssyk_WBHL_group=Unknown" ~
+          "Unknown occupation",
+        TRUE ~ NA_character_
+      )
+    ) #,
+  #   Time  = if_else(time == 1826, "5 yr", "10 yr"),
+  #   ΔRMST = sprintf("%.2f (%.2f–%.2f)",
+  #                   difference,
+  #                   difference_lci,
+  #                   difference_uci)
+  # ) %>%
+  # select(Model, Subgroup, Time, ΔRMST)
 })
+
+hr_table |> print(n = Inf)
 ```
 
 
 ```{r}
+
+# Load required packages
+library(showtext)
+library(sysfonts)
+
+# Add Google Font
+font_add_google("Roboto", "roboto")
+showtext_auto()
 pal <- c(
-  "Overall"        = "#418286",
-  "HPA, 1 test"    = "#418286",
-  "HPA, 2 tests"   = "grey20",
-  "HPA, ≥3 tests"  = "#e1800f",
-  "Men"            = "#418286",
-  "Women"          = "#e1800f",
-  "Age 18–34"      = "#e1800f",
-  "Age 35–49"      = "grey20",
-  "Age ≥50"        = "#418286"
+  "Overall" = "#418286",
+  "HPA, 1 test" = "#418286",
+  "HPA, 2 tests" = "grey20",
+  "HPA, ≥3 tests" = "#e1800f",
+  "Men" = "#418286",
+  "Women" = "#e1800f",
+  "Age 18–34" = "#e1800f",
+  "Age 35–49" = "grey20",
+  "Age ≥50" = "#418286"
 )
 
 ## ---- helper objects ----------------------------------------------------
-breaks_days <- c(91, 182, 365, 365*2, 365*4, 3653, 7306)     # keep as in your code
+breaks_days <- c(91, 182, 365, 365 * 2, 365 * 4, 3653, 7306) # keep as in your code
 labels <- c("3 m", "6 m", "1 y", "2 y", "4 y", "10 y", "20 y")
-label_x     <- 90                                                  # 6 m (first requested label point)
+label_x <- 90 # 6 m (first requested label point)
 
+
+hr_table |> print(n = Inf)
 ## 1. label positions: one row per subgroup, ranked by HR at 3 y -----
 label_df <- hr_table |>
   filter(Group != "Occupation") |>
   mutate(Group = factor(Group, c("Overall", "HPA count", "Sex", "Age grp"))) |>
   group_by(Group, Subgroup) |>
-  slice_min(abs(time - 1095), n = 1) |>                              # HR closest to 3 y
+  slice_min(abs(time - 1095), n = 1) |> # HR closest to 3 y
   ungroup() |>
   group_by(Group) |>
-  arrange(ratio) |>                                            # highest HR at top
+  arrange(ratio) |> # highest HR at top
   mutate(
     x = label_x,
-    y = 1.03 + 0.06*(row_number() - 1)                               # vertical stacking
+    y = 1.05 + 0.06 * (row_number() - 1) # vertical stacking
   ) |>
   ungroup()
 
@@ -141,64 +219,92 @@ hr_table |>
   filter(Group != "Occupation") |>
   mutate(Group = factor(Group, c("Overall", "HPA count", "Sex", "Age grp"))) |>
   ggplot(aes(x = time, y = ratio)) +
-  
+
   ## reference lines
-  geom_vline(xintercept = c(365, 3653), linetype = "dashed", colour = "grey65", linewidth = .25) +
+  geom_vline(
+    xintercept = c(365, 3653),
+    linetype = "dashed",
+    colour = "grey65",
+    linewidth = .25
+  ) +
   geom_hline(yintercept = 1, linetype = "dashed", color = "grey30") +
-  
+
   ## curves + ribbons
-  geom_ribbon(aes(ymin = ratio_lci, ymax = ratio_uci, group = factor(Subgroup)),fill = "grey30", alpha = 0.1) +
+  geom_ribbon(
+    aes(ymin = ratio_lci, ymax = ratio_uci, group = factor(Subgroup)),
+    fill = "grey30",
+    alpha = 0.1
+  ) +
   geom_line(aes(colour = factor(Subgroup)), linewidth = .6) +
-  
+
   ## direct labels -------------------------------------------------------
   geom_text(
-    data   = label_df,
+    data = label_df,
     aes(x = x, y = y, label = Subgroup, colour = Subgroup),
-    hjust  = 0,                                     # left-align text
-    size   = 3.5,
+    family = "roboto",
+    hjust = 0, # left-align text
+    size = 3.5,
     show.legend = FALSE
   ) +
-  
+
   ## scales --------------------------------------------------------------
   coord_cartesian(ylim = c(.5, 1.2)) +
   scale_colour_manual(values = pal, breaks = names(pal)) +
-  scale_fill_manual(values  = pal, breaks = names(pal)) +
-  
-  scale_y_log10(labels = scales::label_comma(),
-                name = " Hazard ratio (95% CI)") +
-  scale_x_log10(
-    position = "top",                               # x-axis above panels
-    name     = expression(log[10]~"time from first HPA"),
-    breaks   = breaks_days,
-    labels   = labels
+  scale_fill_manual(values = pal, breaks = names(pal)) +
+
+  scale_y_log10(
+    labels = scales::label_comma(),
+    name = " Hazard ratio (95% CI)"
   ) +
-  
-  facet_wrap(~ Group) +
-  
+  scale_x_log10(
+    position = "top", # x-axis above panels
+    name = expression("Time from first HPA (axis on " * log[10] * " scale)"),
+    breaks = breaks_days,
+    labels = labels
+  ) +
+
+  facet_wrap(~Group) +
+  labs(caption = "All estimates compare HPAs to their controls (reference)") +
   ## theme ---------------------------------------------------------------
-  theme_minimal(base_size = 11) +
+  theme_minimal(base_size = 11, base_family = "roboto") +
   theme(
-    panel.grid.major   = element_blank(),
-    panel.grid.minor   = element_blank(),
-    legend.position    = "none",
-    legend.box         = "horizontal",
-    legend.title       = element_blank(),
-    legend.text        = element_text(size = 8),
-    legend.key.size    = unit(0.5, "cm"),
-    strip.text         = element_blank(),           # remove facet titles
-    plot.title         = element_text(hjust = 0.5)
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "grey30", size = 10),
+    axis.title = element_text(color = "grey40", size = 11),
+    legend.position = "none",
+    legend.box = "horizontal",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.5, "cm"),
+    strip.text = element_blank(), # remove facet titles
+    plot.title = element_text(hjust = 0.5)
   ) +
   labs(
-    x    = NULL,   # already set in scale_x_log10()
-    y    = "hazard ratio",
-    color = NULL, fill = NULL
+    x = NULL, # already set in scale_x_log10()
+    y = "hazard ratio",
+    color = NULL,
+    fill = NULL
   )
+
+
+ggsave(
+  here::here("..", "results", "figures", "hazard_ratio_over_time_plot.pdf"),
+  width = 210,
+  height = 140,
+  units = "mm",
+  dpi = 300
+)
+
 
 ```
 
 ```{r}
 library(patchwork)
-hazard + ratio + survival + survdiff +
+hazard +
+  ratio +
+  survival +
+  survdiff +
   plot_layout(ncol = 1) +
   plot_annotation(
     title = "",
@@ -209,37 +315,46 @@ hazard + ratio + survival + survdiff +
 
 ```{r}
 
-
-
-  
 rmst_wide <- rmst_table %>%
   pivot_wider(
-    names_from  = Time,
+    names_from = Time,
     values_from = ΔRMST
   ) %>%
   # optional: order the rows exactly as you listed
   mutate(
-    Model = factor(Model,
-                   levels = c("Overall","HPA count","Sex","Age","Occupation")),
-    Subgroup = factor(Subgroup,
-                      levels = c(
-                        "Overall",
-                        "HPA, 1 test","HPA, 2 tests","HPA, ≥3 tests",
-                        "Men","Women",
-                        "Age 25","Age 35","Age 45","Age 55","Age 65",
-                        "White-collar high-skilled","White-collar low-skilled",
-                        "Blue-collar high-skilled","Blue-collar low-skilled",
-                        "Unknown occupation"
-                      ))
+    Model = factor(
+      Model,
+      levels = c("Overall", "HPA count", "Sex", "Age", "Occupation")
+    ),
+    Subgroup = factor(
+      Subgroup,
+      levels = c(
+        "Overall",
+        "HPA, 1 test",
+        "HPA, 2 tests",
+        "HPA, ≥3 tests",
+        "Men",
+        "Women",
+        "Age 25",
+        "Age 35",
+        "Age 45",
+        "Age 55",
+        "Age 65",
+        "White-collar high-skilled",
+        "White-collar low-skilled",
+        "Blue-collar high-skilled",
+        "Blue-collar low-skilled",
+        "Unknown occupation"
+      )
+    )
   ) %>%
-  arrange(Model, Subgroup) |> 
-  select(-Model) |> 
+  arrange(Model, Subgroup) |>
+  select(-Model) |>
   # 1) rename the columns
   rename(
     `Group` = Subgroup,
-    `ΔRMST 5 yr`     = `5 yr`,
-    `ΔRMST 10 yr`    = `10 yr`
+    `ΔRMST 5 yr` = `5 yr`,
+    `ΔRMST 10 yr` = `10 yr`
   )
 
 ```
-

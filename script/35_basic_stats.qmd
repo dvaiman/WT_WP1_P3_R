@@ -1,0 +1,305 @@
+----
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+
+# Description
+
+Basic statistics for results section
+
+
+```{r}
+library(tidyvrse)
+```
+
+
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+
+# basic stats
+```{r}
+# Basic descriptive statistics
+basic_stats <- data_cvd |>
+  summarise(
+    total_participants = sum(treated == "HPA"),
+    total_controls = sum(treated == "Control"),
+    total_matched_pairs = n() / 10, # assuming 1:4 matching
+    .groups = "drop"
+  )
+
+# Calculate person-years of observation
+person_years <- data_cvd |>
+  mutate(
+    person_years_10 = risk_time_art_10yrs / 365.25, # convert days to years
+    person_years = risk_time_art_unrestricted / 365.25 # convert days to years
+  ) |>
+  group_by(treated) |>
+  summarise(
+    total_person_years_10 = sum(person_years_10, na.rm = TRUE),
+    total_person_years = sum(person_years, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Count cardiovascular events during 10-year follow-up
+cvd_events <- data_cvd |>
+  group_by(treated) |>
+  summarise(
+    total_events_10yrs = sum(risk_art_flag_10yrs, na.rm = TRUE),
+    total_events = sum(risk_art_flag_unrestricted, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Enhanced follow-up statistics with IQR - by treatment group
+median_follow_up_by_group <- data_cvd |>
+  group_by(treated) |>
+  summarise(
+    # 10-year follow-up statistics
+    median_10yrs = median(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+    q1_10yrs = quantile(risk_time_art_10yrs / 365.25, 0.25, na.rm = TRUE),
+    q3_10yrs = quantile(risk_time_art_10yrs / 365.25, 0.75, na.rm = TRUE),
+    iqr_10yrs = paste0(
+      round(quantile(risk_time_art_10yrs / 365.25, 0.25, na.rm = TRUE), 1),
+      "-",
+      round(quantile(risk_time_art_10yrs / 365.25, 0.75, na.rm = TRUE), 1)
+    ),
+    min_10yrs = min(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+    max_10yrs = max(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+
+    # Unrestricted follow-up statistics
+    median_unrestricted = median(
+      risk_time_art_unrestricted / 365.25,
+      na.rm = TRUE
+    ),
+    q1_unrestricted = quantile(
+      risk_time_art_unrestricted / 365.25,
+      0.25,
+      na.rm = TRUE
+    ),
+    q3_unrestricted = quantile(
+      risk_time_art_unrestricted / 365.25,
+      0.75,
+      na.rm = TRUE
+    ),
+    iqr_unrestricted = paste0(
+      round(
+        quantile(risk_time_art_unrestricted / 365.25, 0.25, na.rm = TRUE),
+        1
+      ),
+      "-",
+      round(
+        quantile(risk_time_art_unrestricted / 365.25, 0.75, na.rm = TRUE),
+        1
+      )
+    ),
+    min_unrestricted = min(risk_time_art_unrestricted / 365.25, na.rm = TRUE),
+    max_unrestricted = max(risk_time_art_unrestricted / 365.25, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Total population follow-up statistics (for manuscript reporting)
+median_follow_up_total <- data_cvd |>
+  summarise(
+    # 10-year follow-up statistics - total population
+    median_10yrs_total = median(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+    iqr_10yrs_total = paste0(
+      round(quantile(risk_time_art_10yrs / 365.25, 0.25, na.rm = TRUE), 1),
+      "-",
+      round(quantile(risk_time_art_10yrs / 365.25, 0.75, na.rm = TRUE), 1)
+    ),
+    min_10yrs_total = min(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+    max_10yrs_total = max(risk_time_art_10yrs / 365.25, na.rm = TRUE),
+
+    # Unrestricted follow-up statistics - total population
+    median_unrestricted_total = median(
+      risk_time_art_unrestricted / 365.25,
+      na.rm = TRUE
+    ),
+    iqr_unrestricted_total = paste0(
+      round(
+        quantile(risk_time_art_unrestricted / 365.25, 0.25, na.rm = TRUE),
+        1
+      ),
+      "-",
+      round(
+        quantile(risk_time_art_unrestricted / 365.25, 0.75, na.rm = TRUE),
+        1
+      )
+    ),
+    min_unrestricted_total = min(
+      risk_time_art_unrestricted / 365.25,
+      na.rm = TRUE
+    ),
+    max_unrestricted_total = max(
+      risk_time_art_unrestricted / 365.25,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+# Calculate incidence rates per 1000 person-years
+incidence_rates <- person_years |>
+  left_join(cvd_events, by = "treated") |>
+  mutate(
+    incidence_rate_per_1000py_10yrs = (total_events_10yrs /
+      total_person_years_10) *
+      1000,
+    incidence_rate_per_1000py = (total_events / total_person_years) * 1000
+  )
+
+censoring_summary <- data_cvd |>
+  group_by(treated) |>
+  summarise(
+    n_censored_10yrs = sum(
+      risk_time_art_10yrs < (10 * 365.25) & risk_art_flag_10yrs == 0
+    ),
+    n_events_10yrs = sum(risk_art_flag_10yrs == 1),
+    n_administrative_end = sum(risk_time_art_10yrs == (10 * 365.25)),
+    .groups = "drop"
+  )
+
+# Print basic statistics
+print("Basic Statistics:")
+print(basic_stats)
+
+print("\nPerson-years and Events:")
+print(incidence_rates)
+
+print("\nFollow-up time statistics by treatment group:")
+print(median_follow_up_by_group)
+
+print("\nTotal population follow-up statistics (for manuscript):")
+print(median_follow_up_total)
+
+print("\nCensoring summary:")
+print(censoring_summary)
+```
+
+# count of right occupation in controls vs HPAs in their matched pairs (id_cluster)
+
+
+```{r}
+
+# Analysis 1: Average number of matched controls by HPA occupational group
+hpa_matching_quality <- data_cvd |>
+  # First identify HPA participants and their occupational groups
+  filter(treated == "HPA") |>
+  select(LopNr, id_cluster, ssyk_WBHL_group) |>
+  rename(hpa_occupation = ssyk_WBHL_group) |>
+  # Join with all individuals in same clusters to get controls
+  left_join(
+    data_cvd |> select(LopNr, id_cluster, ssyk_WBHL_group, treated),
+    by = "id_cluster",
+    suffix = c("_hpa", "_all")
+  ) |>
+  # Keep only the controls for each HPA participant
+  filter(treated == "Control") |>
+  drop_na(hpa_occupation) |>
+  # Count matching occupations per cluster
+  group_by(id_cluster, hpa_occupation) |>
+  summarise(
+    total_controls = n(),
+    matching_controls = sum(ssyk_WBHL_group == hpa_occupation),
+    .groups = "drop"
+  ) |>
+  # Summarize by HPA occupational group
+  group_by(hpa_occupation) |>
+  summarise(
+    n_hpa_participants = n(),
+    mean_total_controls = round(mean(total_controls), 1),
+    mean_matching_controls = round(mean(matching_controls, na.rm = TRUE), 2),
+    sd_matching_controls = round(sd(matching_controls, na.rm = TRUE), 2),
+    percent_perfect_match = round(
+      mean(matching_controls == 4, na.rm = TRUE) * 100,
+      1
+    ),
+    percent_no_match = round(
+      mean(matching_controls == 0, na.rm = TRUE) * 100,
+      1
+    ),
+    .groups = "drop"
+  ) |>
+  arrange(desc(mean_matching_controls))
+
+print("Average matching quality by HPA occupational group:")
+print(hpa_matching_quality)
+```
+
+
+
+# NNT ARR
+
+```{r}
+m3 = coxph(
+  Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+    treated +
+      birth_cohort +
+      Age +
+      Sex +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI,
+  data = data_cvd
+)
+```
+
+```{r}
+library(marginaleffects)
+
+# 1. Marginal survival curves (population-averaged)
+marg_surv <- predictions(
+  m3,
+  newdata = datagrid(treated = c("Control", "HPA")),
+  type = "survival",
+  by = "treated"
+)
+
+# 2. Marginal risk differences at specific time points
+risk_diff_10yr <- comparisons(
+  m3,
+  variables = "treated",
+  type = "survival",
+  newdata = datagrid(treated = c("Control", "HPA")),
+  # This gives you population-averaged risk difference
+)
+
+# Convert to risk (1 - survival)
+risk_control <- 1 - 0.017 # 0.017 = 1.7%
+risk_hpa <- 1 - 0.016 # 0.016 = 1.6%
+
+# Absolute risk reduction (ARR)
+# Calculate risks (1 - survival)
+risk_control <- 1 - survival_control # 1 - 0.983 = 0.017
+risk_hpa <- 1 - survival_hpa # 1 - 0.984 = 0.016
+ARR <- 0.00182 # 0.182 percentage points lower CVD risk with HPA
+ARR_lower <- 0.00136 # conf.low from risk_diff_10yr
+ARR_upper <- 0.00227 # conf.high from risk_diff_10yr
+
+# Public health metrics
+NNT <- 1 / ARR
+ARR_per_1000 <- ARR * 1000
+
+cat("Population-averaged 10-year public health metrics:\n")
+cat("Absolute risk reduction:", round(ARR, 4), "(", round(ARR * 100, 2), "%)\n")
+cat("Number needed to treat:", round(NNT, 0), "\n")
+cat(
+  "CVD cases prevented per 1,000 HPA participants:",
+  round(ARR_per_1000, 1),
+  "\n"
+)
+```

@@ -3,6 +3,11 @@ title: "Untitled"
 format: html
 ---
 
+
+# Description
+
+Table 1 descriptive statistics.
+
 ```{r}
 library(tidyverse)
 library(gtsummary)
@@ -18,59 +23,68 @@ source(here::here("script", "01_data_source_file.R"))
 
 ```{r}
 tbl_1 <- tbl_summary(
-data_cvd |> 
-  mutate(treated = if_else(treated == "HPA", "HPA, overall", treated)),
-  statistic = list(all_continuous() ~ "{mean} ({sd})", all_categorical() ~
-    "{n} ({p}%)"),
+  data_cvd |>
+    mutate(
+      treated = if_else(treated == "HPA", "HPA, overall", treated),
+      SSYK = if_else(SSYK == "Military", NA, SSYK),
+      SSYK = fct_drop(SSYK, only = "Military"),
+      comorbidity = if_else(comorbidity == "=>3", "≥3", comorbidity),
+      comorbidity = fct_relevel(comorbidity, "0", "1", "2", "≥3"),
+      risk_time_art_unrestricted = risk_time_art_unrestricted / 365.25,
+      risk_time_art_10yrs = risk_time_art_10yrs / 365.25
+    ),
+  statistic = list(
+    all_continuous() ~ "{mean} ({sd})",
+    all_categorical() ~ "{n} ({p}%)"
+  ),
   include = c(
-    Age, 
+    Age,
     Sex,
-    Place_of_origin, 
+    Place_of_origin,
     Civil_status,
     EducationLevel,
-    
-    # SSYK, 
-    ssyk_WBHL_group,
+
+    # SSYK,
+    SSYK,
     IncomeLevel_CSFVI,
-    KommunSize, 
-    comorbidity, 
+    KommunSize,
+    comorbidity,
     cvd_art_before_HPA_flag,
     risk_art_flag_10yrs,
     risk_art_flag_unrestricted,
     risk_time_art_10yrs,
     risk_time_art_unrestricted,
 
-   # Income_Sources_Category, 
-   # Turnover_Rate_Category,
-   # Number_of_employees_Category,
-   # Operating_Profit_Margin_Category
+    # Income_Sources_Category,
+    # Turnover_Rate_Category,
+    # Number_of_employees_Category,
+    # Operating_Profit_Margin_Category
   ),
-  by = treated,           # split table by group., n_tests_within_5_fac
-  missing = "ifany",      # list missing data if any
+  by = treated, # split table by group., n_tests_within_5_fac
+  missing = "ifany", # list missing data if any
   label = list(
     Sex = "Sex",
     Place_of_origin ~ "Place of origin",
     # n_tests_within_5_fac ~ "Number of tests within 5 years",
     cvd_art_before_HPA_flag ~ "CVD (before HPA)",
-        risk_art_flag_10yrs ~ "CVD (ten year)",
+    risk_art_flag_10yrs ~ "CVD (Within ten years)",
     risk_art_flag_unrestricted ~ "CVD (Unrestricted)",
-    risk_time_art_10yrs ~ "Ten year risk time (days)",
-    risk_time_art_unrestricted ~ "Unrestricted risk time (days)",
+    risk_time_art_10yrs ~ "Ten year risk time (years)",
+    risk_time_art_unrestricted ~ "Unrestricted risk time (years)",
     KommunSize ~ "Municipality",
     Civil_status ~ "Civil status",
     EducationLevel ~ "Education level",
-    ssyk_WBHL_group ~ "Occupation",
+    SSYK ~ "Occupation (since 2001)",
     #SSYK ~ "Occupation",
     comorbidity ~ "Weighted comorbidity index score",
     IncomeLevel_CSFVI ~ "Income (Percentage of median)"
-   # Income_Sources_Category ~ "Income sources",
-   # Turnover_Rate_Category ~ "Staff turnover",
-   # Number_of_employees_Category ~ "Number of employees",
-   # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
+    # Income_Sources_Category ~ "Income sources",
+    # Turnover_Rate_Category ~ "Staff turnover",
+    # Number_of_employees_Category ~ "Number of employees",
+    # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
   )
 ) |>
-  bold_labels() 
-
+  bold_labels()
 
 
 ```
@@ -78,93 +92,90 @@ data_cvd |>
 
 ```{r}
 tbl_2 <- tbl_summary(
-data_cvd |> filter(treated == "HPA") |> 
-  mutate(
-    n_tests_within_5_fac = factor(n_tests_within_5_fac, levels = c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests"))
+  data_cvd |>
+    filter(treated == "HPA") |>
+    mutate(
+      n_tests_within_5_fac = factor(
+        n_tests_within_5_fac,
+        levels = c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests")
+      ),
+      SSYK = if_else(SSYK == "Military", NA, SSYK),
+      SSYK = fct_drop(SSYK, only = "Military"),
+      comorbidity = if_else(comorbidity == "=>3", "≥3", comorbidity),
+      comorbidity = fct_relevel(comorbidity, "0", "1", "2", "≥3"),
+      risk_time_art_unrestricted = risk_time_art_unrestricted / 365.25,
+      risk_time_art_10yrs = risk_time_art_10yrs / 365.25
+    ),
+  statistic = list(
+    all_continuous() ~ "{mean} ({sd})",
+    all_categorical() ~ "{n} ({p}%)"
   ),
-  statistic = list(all_continuous() ~ "{mean} ({sd})", all_categorical() ~
-  "{n} ({p}%)"),
   include = c(
-    Age, 
+    Age,
     Sex,
-    Place_of_origin, 
+    Place_of_origin,
     Civil_status,
     EducationLevel,
-    
-    # SSYK, 
-    ssyk_WBHL_group,
+
+    # SSYK,
+    SSYK,
     IncomeLevel_CSFVI,
-    KommunSize, 
-    comorbidity, 
+    KommunSize,
+    comorbidity,
     cvd_art_before_HPA_flag,
     risk_art_flag_10yrs,
     risk_art_flag_unrestricted,
     risk_time_art_10yrs,
     risk_time_art_unrestricted,
 
-   # Income_Sources_Category, 
-   # Turnover_Rate_Category,
-   # Number_of_employees_Category,
-   # Operating_Profit_Margin_Category
+    # Income_Sources_Category,
+    # Turnover_Rate_Category,
+    # Number_of_employees_Category,
+    # Operating_Profit_Margin_Category
   ),
-  by = n_tests_within_5_fac,           # split table by group., n_tests_within_5_fac
-  missing = "ifany",      # list missing data if any
+  by = n_tests_within_5_fac, # split table by group., n_tests_within_5_fac
+  missing = "ifany", # list missing data if any
   label = list(
     Sex = "Sex",
     Place_of_origin ~ "Place of origin",
     # n_tests_within_5_fac ~ "Number of tests within 5 years",
     cvd_art_before_HPA_flag ~ "CVD (before HPA)",
-        risk_art_flag_10yrs ~ "CVD (ten year)",
+    risk_art_flag_10yrs ~ "CVD (Within ten years)",
     risk_art_flag_unrestricted ~ "CVD (Unrestricted)",
-    risk_time_art_10yrs ~ "Ten year risk time (days)",
-    risk_time_art_unrestricted ~ "Unrestricted risk time (days)",
+    risk_time_art_10yrs ~ "Ten year risk time (years)",
+    risk_time_art_unrestricted ~ "Unrestricted risk time (years)",
     KommunSize ~ "Municipality",
     Civil_status ~ "Civil status",
     EducationLevel ~ "Education level",
-    ssyk_WBHL_group ~ "Occupation",
+    SSYK ~ "Occupation (since 2001)",
     #SSYK ~ "Occupation",
     comorbidity ~ "Weighted comorbidity index score",
     IncomeLevel_CSFVI ~ "Income (Percentage of median)"
-   # Income_Sources_Category ~ "Income sources",
-   # Turnover_Rate_Category ~ "Staff turnover",
-   # Number_of_employees_Category ~ "Number of employees",
-   # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
+    # Income_Sources_Category ~ "Income sources",
+    # Turnover_Rate_Category ~ "Staff turnover",
+    # Number_of_employees_Category ~ "Number of employees",
+    # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
   )
 ) |>
-  bold_labels() 
-
-
+  bold_labels()
 
 
 # merge tables
 tbl_merge_ex1 <-
   tbl_merge(
     tbls = list(tbl_1, tbl_2),
-    tab_spanner = c("**Main comparison**", "**Stratified on number of HPAs within 5-years**")
-  ) |> 
-   as_gt() |>
+    tab_spanner = c(
+      "**Main comparison**",
+      "**Stratified on number of HPAs within 5-years**"
+    )
+  ) |>
+  as_gt() |>
   tab_options(
-    table.font.size = "x-small",      # smaller font size
-    data_row.padding = px(1),       # less padding in data rows
-    heading.padding = px(1)         # less padding in headings
+    table.font.size = "x-small", # smaller font size
+    data_row.padding = px(1), # less padding in data rows
+    heading.padding = px(1) # less padding in headings
   )
 
-tbl_merge_ex1
+
+gtsave(tbl_merge_ex1, here::here("..", "results", "tables", "table_1.docx"))
 ```
-
-```{r}
-gtsave(gt_tbl, here::here("figures and tables", "table_1.png"))
-gtsave(gt_tbl, here::here("figures and tables", "table_1_wide.png"))
-```
-
-
-End of 
-risk time : 
-
-```{r}
-data_cvd |>  count(risk_time_art)
-data_cvd |>  count(risk_time_art, risk_end_art, event_art, risk_art_flag) |> view(
-  
-)
-```
-

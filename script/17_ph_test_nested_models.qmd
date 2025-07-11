@@ -1,0 +1,234 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+
+# Description
+proportional‐hazards test for your sex, age interaction and occupation interaction models.  For each modifier you fit two nested models—one with a proportional treatment effect (anc = ~ treated) and one allowing the treatment spline to vary by that modifier (anc = ~ treated + treated:modifier)—then perform a likelihood‐ratio test.
+
+
+
+```{r}
+library(tidyverse)
+library(flexsurv)
+```
+
+
+
+
+
+```{r}
+
+# Model 1: proportional hazards by sex (no Sex in the spline ancillaries)
+fit_sex_ph <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      Sex +
+      Age +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI +
+      ssyk_WBHL_group,
+  anc = list(
+    gamma1 = ~treated,
+    gamma2 = ~treated,
+    gamma3 = ~treated
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# Model 2: allow treatment spline shape to differ by sex (non‐proportional hazards)
+fit_sex_tvh <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      Sex +
+      Age +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI +
+      ssyk_WBHL_group,
+  anc = list(
+    gamma1 = ~ treated + Sex,
+    gamma2 = ~ treated + Sex,
+    gamma3 = ~ treated + Sex
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# extract log‐likelihoods and number of parameters
+ll_ph <- fit_sex_ph$loglik # –898492
+ll_tvh <- fit_sex_tvh$loglik # –898434.8
+npar_ph <- fit_sex_ph$npars # 28
+npar_tvh <- fit_sex_tvh$npars # 31
+
+# compute LRT statistic and degrees of freedom
+lrt_stat <- 2 * (ll_tvh - ll_ph)
+df_diff <- npar_tvh - npar_ph
+
+# p‐value for chi‐square(df = 3)
+p_value <- pchisq(lrt_stat, df = df_diff, lower.tail = FALSE)
+
+# report
+cat(
+  "LRT χ² =",
+  round(lrt_stat, 1),
+  "on",
+  df_diff,
+  "df; p =",
+  format.pval(p_value, digits = 3),
+  "\n"
+)
+```
+
+large χ² and tiny p‐value tells that allowing the spline shape of the treatment effect to differ by sex (i.e. non–proportional hazards) significantly improves model fit. In other words, the treatment hazard ratio does vary over time by sex, and we should retain the Sex terms in your anc = list(gamma…) if we wish to model that time‐varying behaviour.
+
+```{r}
+library(flexsurv)
+
+# Model A1: proportional hazards by age (no Age in the spline ancillaries)
+fit_age_ph <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      Age +
+      Sex +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI +
+      ssyk_WBHL_group,
+  anc = list(
+    gamma1 = ~treated,
+    gamma2 = ~treated,
+    gamma3 = ~treated
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# Model A2: allow treatment spline shape to differ by age (non‐PH by age)
+fit_age_tvh <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      Age +
+      Sex +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI +
+      ssyk_WBHL_group,
+  anc = list(
+    gamma1 = ~ treated + treated:Age,
+    gamma2 = ~ treated + treated:Age,
+    gamma3 = ~ treated + treated:Age
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# LRT for age
+ll_ph_age <- fit_age_ph$loglik
+ll_tvh_age <- fit_age_tvh$loglik
+npar_ph_age <- fit_age_ph$npars
+npar_tvh_age <- fit_age_tvh$npars
+
+lrt_age <- 2 * (ll_tvh_age - ll_ph_age)
+df_age <- npar_tvh_age - npar_ph_age
+p_age <- pchisq(lrt_age, df = df_age, lower.tail = FALSE)
+
+cat(
+  "Age LRT χ² =",
+  round(lrt_age, 1),
+  "on",
+  df_age,
+  "df; p =",
+  format.pval(p_age, 3),
+  "\n"
+)
+```
+
+
+
+```{r}
+# Model O1: proportional hazards by occupation (no occupation in ancillaries)
+fit_occ_ph <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      ssyk_WBHL_group +
+      Sex +
+      Age +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI,
+  anc = list(
+    gamma1 = ~treated,
+    gamma2 = ~treated,
+    gamma3 = ~treated
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# Model O2: allow treatment spline shape to differ by occupation (non‐PH by occupation)
+fit_occ_tvh <- flexsurvspline(
+  formula = Surv(risk_time_art_unrestricted, risk_art_flag_unrestricted) ~
+    treated +
+      ssyk_WBHL_group +
+      Sex +
+      Age +
+      birth_cohort +
+      comorbidity +
+      cvd_art_before_HPA_flag +
+      IncomeLevel_CSFVI,
+  anc = list(
+    gamma1 = ~ treated + treated:ssyk_WBHL_group,
+    gamma2 = ~ treated + treated:ssyk_WBHL_group,
+    gamma3 = ~ treated + treated:ssyk_WBHL_group
+  ),
+  data = data_cvd,
+  k = 2,
+  scale = "hazard"
+)
+
+# LRT for occupation
+ll_ph_occ <- fit_occ_ph$loglik
+ll_tvh_occ <- fit_occ_tvh$loglik
+npar_ph_occ <- fit_occ_ph$npars
+npar_tvh_occ <- fit_occ_tvh$npars
+
+lrt_occ <- 2 * (ll_tvh_occ - ll_ph_occ)
+df_occ <- npar_tvh_occ - npar_ph_occ
+p_occ <- pchisq(lrt_occ, df = df_occ, lower.tail = FALSE)
+
+cat(
+  "Occupation LRT χ² =",
+  round(lrt_occ, 1),
+  "on",
+  df_occ,
+  "df; p =",
+  format.pval(p_occ, 3),
+  "\n"
+)
+```

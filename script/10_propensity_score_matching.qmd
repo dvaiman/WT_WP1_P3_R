@@ -9,13 +9,29 @@ format:
 author: Daniel Väisänen
 editor: source
 toc: true
-execute: 
+execute:
   warning: false
   echo: true
+  eval: false
 ---
+
 
 # Project description
 
+
+## Script: Propensity Score Matching for HPI vs. General Population (1995–2021)
+Description:
+This script performs yearly 4:1 propensity score matching to compare the
+HPI intervention population with the general Swedish population using
+demographic covariates (Sex, Birth Year, Education). It ensures unique matches
+per year, checks covariate balance, and prepares matched datasets for
+downstream analysis and register-based follow-up.
+
+## Outputs:
+- Yearly matchit objects (.rds)
+- Combined matched dataset with cluster IDs
+- Covariate balance statistics
+- Summary tables for comparison
 
 
 
@@ -23,11 +39,15 @@ execute:
 ## Libraries
 
 ```{r}
-library(tidyverse)
-library(MatchIt)
-library(here)
-library(dtplyr)
-library(data.table)
+library(tidyverse) # Includes dplyr, ggplot2, readr, etc.
+library(MatchIt) # For propensity score matching
+library(here) # For relative file paths
+library(dtplyr) # For lazy_dt and data.table backend
+library(data.table) # For efficient data handling with fread and rbindlist
+library(tictoc) # For timing operations
+library(progress) # For progress bars
+library(cobalt) # For covariate balance checking
+library(gtsummary) # For summary tables
 ```
 
 
@@ -47,17 +67,13 @@ Iterate over datasets to extract and combine necessary variables
 
 # Define a function to extract desired variables from each dataset
 extract_variables <- function(file_path) {
-  # Load the dataset
   dataset <- read_csv(file_path)
-  
   # Extract the year from the file name
   year <- str_extract(basename(file_path), "\\d{4}")  # Extracting the first four digits (year)
-  
   # Extract LopNr, and variables starting with sun, Kon, Age
   extracted_data <- dataset %>%
     select(LopNr, Kommun, KommunSize, starts_with("edu"), starts_with("EducationLevel"),  starts_with("Kon"), starts_with("Age"), starts_with("Fodelse")) %>%
     mutate(Year = year)  # Add the year as a new column
-  
   return(extracted_data)
 }
 
@@ -74,7 +90,7 @@ final_dataset <- tibble()
 for (file in file_list) {
   # Extract variables from the current dataset
   current_data <- extract_variables(file)
-  
+
   # Combine with the final dataset
   final_dataset <- bind_rows(final_dataset, current_data)
 }
@@ -85,6 +101,8 @@ print(final_dataset)
 write_csv(final_dataset, here::here("..", "data", "scb_match_population.csv"))
 
 ```
+
+## Data check
 
 ```{r}
 final_dataset %>% distinct(LopNr, Year) %>% nrow()
@@ -142,130 +160,19 @@ combined_data[, (categorical_cols) := lapply(.SD, as.factor), .SDcols = categori
 ```
 
 # Propensity score matching
-Iterate over years to use the matchIt function by year
+Iterate over years to use the matchIt function by year in a memmory efficient way.
 
 https://cran.r-project.org/web/packages/MatchIt/vignettes/MatchIt.html#ref-vanderweele2019
 https://kosukeimai.github.io/MatchIt/reference/distance.html
 
-```{r}
-# Load necessary libraries
-library(MatchIt)
-library(tictoc)
-library(progress)
-library(data.table)
-
-# Convert combined_data to data.table for efficient processing
-combined_data <- as.data.table(combined_data)
-
-# Ensure 'treated' is binary
-# Adjust the conversion based on your data's current encoding
-# Example: Convert logical to numeric
-# combined_data[, treated := as.numeric(treated)]
-
-# Define the years
-years <- sort(unique(combined_data$Year))
-
-# Initialize the progress bar
-pb <- progress_bar$new(
-  format = "  Processing Year :year [:bar] :percent in :elapsed",
-  total = length(years), clear = FALSE, width = 60
-)
-
-# Create a log file to record progress and any errors
-log_con <- file("processing_log.txt", open = "wt")
-writeLines(paste("Processing started at", Sys.time()), con = log_con)
-
-# Initialize an empty list to store results if needed
-# all_matches <- list()
-
-for (year in years) {
-  # Start timing for the current year
-  tic(paste("Processing Year:", year))
-  
-  # Subset data for the current year using data.table for efficiency
-  subset_data <- combined_data[Year == year]
-  
-  # Check if 'treated' is binary in this subset
-  unique_treated <- unique(subset_data$treated)
-  unique_treated <- unique_treated[!is.na(unique_treated)]  # Remove NA for checking
-  
-  if (length(unique_treated) != 2 || !all(unique_treated %in% c(0, 1))) {
-    # Log the error and skip to the next iteration
-    message_text <- paste("Error processing Year", year, ": The treatment must be a binary variable. Found values:", paste(unique_treated, collapse = ", "))
-    writeLines(message_text, con = log_con)
-    message(message_text)
-    
-    # Update the progress bar
-    pb$tick(tokens = list(year = year))
-    
-    # Skip processing for this year
-    next
-  }
-  
-  # Run matchit without including Year in the formula
-  nearest_neighbor_match <- tryCatch({
-    matchit(
-      treated ~ Sex + FodelseAr + SUN2000Niva_Old,
-      data = subset_data,
-      method = "nearest",
-      distance = "glm",
-      link = "logit",
-      ratio = 4,
-      replace = FALSE
-    )
-  }, error = function(e) {
-    # Log the error and skip to the next iteration
-    message_text <- paste("Error processing Year", year, ":", e$message)
-    writeLines(message_text, con = log_con)
-    message(message_text)
-    return(NULL)
-  })
-  
-  # Stop timing for the current year
-  toc()
-  
-  if (!is.null(nearest_neighbor_match)) {
-    # Save the matchit object to disk
-    saveRDS(nearest_neighbor_match, paste0("matchit_results_", year, ".rds"))
-    
-    # Optionally store in a list (commented out to save memory)
-    # all_matches[[as.character(year)]] <- nearest_neighbor_match
-    
-    # Log the successful processing
-    message_text <- paste("Year", year, "processed successfully.")
-    writeLines(message_text, con = log_con)
-    message(message_text)
-  }
-  
-  # Clear memory
-  rm(nearest_neighbor_match, subset_data)
-  gc()
-  
-  # Update the progress bar
-  pb$tick(tokens = list(year = year))
-}
-
-# Close the log file
-writeLines(paste("Processing completed at", Sys.time()), con = log_con)
-close(log_con)
-```
-
-# xxx
 
 ```{r}
-# Load necessary libraries
-library(MatchIt)
-library(tictoc)
-library(progress)
-library(cobalt)
-library(data.table)
 
 # Convert combined_data to data.table for efficient processing
 combined_data <- as.data.table(combined_data)
 
 
-# Adjust the conversion based on your data's current encoding
-# Example: Convert logical to numeric
+# Adjust the conversion based on data's current encoding, for exampleConvert logical to numeric
 # combined_data[, treated := as.numeric(treated)]
 
 # Define the years
@@ -287,27 +194,27 @@ matched_ids <- c()
 for (year in years) {
   # Start timing for the current year
   tic(paste("Processing Year:", year))
-  
+
   # Subset data for the current year and exclude already matched individuals
   subset_data <- combined_data[Year == year & !(LopNr %in% matched_ids)]
-  
+
   # Check if 'treated' is binary in this subset
   unique_treated <- unique(subset_data$treated)
   unique_treated <- unique_treated[!is.na(unique_treated)]  # Remove NA for checking
-  
+
   if (length(unique_treated) != 2 || !all(unique_treated %in% c(0, 1))) {
     # Log the error and skip to the next iteration
     message_text <- paste("Error processing Year", year, ": The treatment must be a binary variable. Found values:", paste(unique_treated, collapse = ", "))
     writeLines(message_text, con = log_con)
     message(message_text)
-    
+
     # Update the progress bar
     pb$tick(tokens = list(year = year))
-    
+
     # Skip processing for this year
     next
   }
-  
+
   # Run matchit without including Year in the formula
   nearest_neighbor_match <- tryCatch({
     matchit(
@@ -326,33 +233,33 @@ for (year in years) {
     message(message_text)
     return(NULL)
   })
-  
+
   # Stop timing for the current year
   toc()
-  
+
   if (!is.null(nearest_neighbor_match)) {
     # Save the matchit object to disk
     saveRDS(nearest_neighbor_match, paste0("matchit_results_", year, ".rds"))
-    
+
     # Extract matched data
     matched_data <- match.data(nearest_neighbor_match)
-    
+
     # Update the list of matched IDs with both treated and control individuals
     matched_ids <- c(matched_ids, matched_data$LopNr)
-    
+
     # Ensure matched_ids remains unique
     matched_ids <- unique(matched_ids)
-    
+
     # Log the successful processing
     message_text <- paste("Year", year, "processed successfully. Matched IDs added.")
     writeLines(message_text, con = log_con)
     message(message_text)
   }
-  
+
   # Clear memory
   rm(nearest_neighbor_match, subset_data, matched_data)
   gc()
-  
+
   # Update the progress bar
   pb$tick(tokens = list(year = year))
 }
@@ -364,60 +271,43 @@ close(log_con)
 
 
 # Check if the results are balenced
-
+Can be run from here
 ```{r}
 
-# files are here, names are matchit_results_1995.rds and so on
-rds_dir <- here()
 
+
+# 1. where the .rds files live
+match_dir <- here("..", "data", "matchit_objects")
+
+# 2. list all files that look like  matchit_results_1998.rds  etc.
 rds_files <- list.files(
-  path = rds_dir,
-  pattern = "^matchit_results_\\d{4}\\.rds$",  # Regex to match filenames like matchit_results_1995.rds
-  full.names = TRUE                           # Return full file paths
+  path       = match_dir,
+  pattern    = "^matchit_results_\\d{4}\\.rds$",
+  full.names = TRUE
 )
 
-# Initialize an empty list to store balance statistics
-balance_list <- list()
+# 3. loop, compute balance, keep rownames
+balance_long <- map_dfr(rds_files, function(fp) {
+  yr <- str_extract(basename(fp), "\\d{4}") |> as.integer()
 
-for (file_path in rds_files) {
-  # Extract the year from the filename
-  year <- str_extract(basename(file_path), "\\d{4}") %>% as.integer()
-  
-  # Read the MatchIt object from the .rds file
-  matchit_obj <- readRDS(file_path)
-  
-  # Compute balance statistics using bal.tab from the cobalt package
-  balance <- bal.tab(matchit_obj)$Balance
-  
-  # Add Year information to the balance data
-  balance$Year <- year
-  
-  # Append the balance data to the list with the year as the key
-  balance_list[[as.character(year)]] <- balance
-}
+  bal_obj <- readRDS(fp) |> bal.tab(un = TRUE)   # compute balance
+  bal_tbl <- bal_obj$Balance                     # extract the table
 
-# Combine all balance statistics into one data frame
-combined_balance <- bind_rows(balance_list, .id = "Year")
+  bal_tbl |>
+    tibble::rownames_to_column("covariate") |>
+    mutate(year = yr)
+})
 
-# View the combined balance statistics
-combined_balance %>%  filter(Type=="Distance") %>% summarise(round(mean(Diff.Adj), 10))
+# 4. save the result for later use
+write_csv(balance_long, here("..", "data", "combined_balance_stats.csv"))
 
-combined_balance %>%  rownames_to_column(var = "combined_balance")  %>% filter(Type != "Distance", Diff.Adj > 0.05 | Diff.Adj < -0.05) 
 
-combined_balance %>%  rownames_to_column(var = "combined_balance")  %>% filter(Diff.Adj != 0) 
 
-# Save the combined balance statistics
-write.csv(combined_balance, here::here("combined_balance_stats.csv"), row.names = FALSE)
 ```
 
 # read .rds files and put them into one dataset
 
 ```{r}
-
-library(tidyverse)  
-library(here)       # For handling file paths
-library(cobalt)     # For balance statistics (if needed)
-library(progress)   # For progress bar
 
 # Define the directory containing the .rds files
 rds_directory <- here()
@@ -433,17 +323,17 @@ rds_files <- list.files(
 process_rds <- function(file_path) {
   # Extract year from filename
   year <- str_extract(basename(file_path), "\\d{4}") %>% as.integer()
-  
+
   # Read the MatchIt object
   matchit_obj <- readRDS(file_path)
-  
+
   # Extract matched data
   matched_data <- match.data(matchit_obj)
-  
+
   # Add Year information
   matched_data <- matched_data %>%
     mutate(Year = year)
-  
+
   return(matched_data)
 }
 
@@ -463,7 +353,7 @@ process_rds_with_progress <- function(file_path) {
 
 # Apply the function to all .rds files and combine into one tibble
 combined_matched_data <- rds_files %>%
-  set_names() %>%                        # Optionally preserve file names as names
+  set_names() %>%
   map_dfr(process_rds_with_progress)      # Combine into a single tibble by row-binding
 
 # Save the combined matched data to disk
@@ -471,14 +361,6 @@ combined_matched_data <- rds_files %>%
 
 # Save as a CSV for easier access
 write_csv(combined_matched_data, here("combined_matched_data.csv"))
-
-# Example: View the first few rows
-print(head(combined_matched_data))
-
-# Example: Check unique years
-print(unique(combined_matched_data$Year))
-
-
 
 
 
@@ -489,9 +371,9 @@ print(unique(combined_matched_data$Year))
 
 ```{r}
 combined_matched_data <-
-  combined_matched_data |> 
-  group_by(Year, subclass) |> 
-  mutate(id_cluster = cur_group_id()) |> 
+  combined_matched_data |>
+  group_by(Year, subclass) |>
+  mutate(id_cluster = cur_group_id()) |>
   ungroup()
 
 ```
@@ -513,7 +395,7 @@ combined_matched_data <- read_csv(here::here("..", "data", "combined_matched_dat
 # Data for SCB-datauttag
 
 ```{r}
-reg_ut <- combined_matched_data |> select(LopNr, Year, treated, id_cluster) 
+reg_ut <- combined_matched_data |> select(LopNr, Year, treated, id_cluster)
 
 write_csv(reg_ut, here::here("..", "data", "registeruttagdata_2025-01-16.csv"))
 
@@ -533,19 +415,19 @@ library(gtsummary)
     include = c(Sex, FodelseAr, Year, SUN2000Niva_Old),
     by = treated, # split table by group
     missing = "no" # don't list missing data separately
-  ) |> 
+  ) |>
   add_n() |> # add column with total number of non-missing observations
   add_p() |> # test for a difference between groups
   modify_header(label = "**Variable**") |> # update the column header
   bold_labels()
-  
-  
+
+
 # duplicated id numbers
-  combined_matched_data %>% filter(treated == 0) %>% group_by(LopNr) %>% summarise(number_with_same_id = n()) %>% count(number_with_same_id) 
-  
-  
-combined_matched_data %>% 
-  ggplot(aes(x = SUN2000Niva_Old, fill = treated, group = treated)) + 
+  combined_matched_data %>% filter(treated == 0) %>% group_by(LopNr) %>% summarise(number_with_same_id = n()) %>% count(number_with_same_id)
+
+
+combined_matched_data %>%
+  ggplot(aes(x = SUN2000Niva_Old, fill = treated, group = treated)) +
   geom_bar(position = "dodge") +
   labs(title = "Distribution of SUN2000Niva_Old by treatment group",
        x = "SUN2000Niva_Old",
@@ -553,15 +435,42 @@ combined_matched_data %>%
   theme_minimal()
 
 
-combined_matched_data %>% 
-  ggplot(aes(x = FodelseAr, fill = as.factor(treated), group = as.factor(treated))) + 
+combined_matched_data %>%
+  ggplot(aes(x = FodelseAr, fill = as.factor(treated), group = as.factor(treated))) +
   geom_density(position = position_dodge(width = 1), alpha=.5) +
   facet_wrap(~Year) +
   labs(title = "Distribution of birth year by treatment group",
        x = "SUN2000Niva_Old",
        y = "Count") +
   theme_minimal()
-  
+
 ```
 
 
+## Education Balance
+
+```{r}
+
+balance_long <-
+read_csv(here("..", "data", "combined_balance_stats.csv"))
+
+
+edu_bal <- balance_long |>
+  filter(str_detect(covariate, "SUN2000Niva|^edu|EducationLevel")) |>
+  arrange(year)
+
+# quick view
+print(edu_bal %>% select(year, covariate, Diff.Un, Diff.Adj), n = Inf)
+
+# optional visual check
+edu_bal |>
+  ggplot(aes(year, Diff.Adj)) +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = c(-.1, .1), linetype = "dotted") +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ covariate, scales = "free_y") +
+  labs(y = "standardized mean difference after matching",
+       x = NULL,
+       title = "balance on education covariates by year")
+```

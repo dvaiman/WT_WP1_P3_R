@@ -1,0 +1,199 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+# data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+```
+
+
+
+# check variable coding and transformations:
+
+
+
+# Time to event exploration
+
+## Risk time distrubution in treated and controls, in event and non event groups
+```{r}
+ggplot(data_cvd, aes(x = risk_time_art)) +
+  geom_histogram(bins = 30, fill = "grey80", color = "black") +
+  facet_wrap(~ treated + cvd_broad_after_HPA_flag, scales = "free" ) +
+  labs(title = "Distribution of Risk Time",
+       x = "Risk Time (days)",
+       y = "Count")
+```
+
+## excluding < 1825 days
+
+
+```{r}
+ggplot(data_cvd |>  filter(risk_time_art < 1825), aes(x = risk_time_art)) +
+  geom_histogram(bins = 50, fill = "grey80", color = "black") +
+  facet_wrap(~ treated + cvd_broad_after_HPA_flag, scales = "free" ) +
+  labs(title = "Distribution of Risk Time",
+       x = "Risk Time (days)",
+       y = "Count")
+```
+
+
+# Age distribution
+```{r}
+ggplot(data_cvd, aes(x = Age)) +
+  geom_histogram(bins = 50, fill = "grey80", color = "black") +
+  facet_wrap(~ treated + cvd_broad_after_HPA_flag, scales = "free" ) +
+  labs(title = "Distribution of Risk Time",
+       x = "Risk Time (days)",
+       y = "Count")
+```
+
+# Year performed HPA and their controls distribution
+```{r}
+ggplot(data_cvd, aes(x = Year)) +
+  geom_histogram(bins = 50, fill = "grey80", color = "black") +
+  facet_wrap(~ treated + cvd_broad_after_HPA_flag, scales = "free" ) +
+  labs(title = "Distribution of Risk Time",
+       x = "Risk Time (days)",
+       y = "Count")
+```
+
+
+
+```{r}
+ggplot(data_cvd, aes(x = comorbidity)) +
+  geom_histogram(bins = 50, fill = "grey80", color = "black", stat = "count") +
+  facet_wrap(~ treated + cvd_broad_after_HPA_flag, scales = "free" ) +
+  labs(title = "Distribution of Risk Time",
+       x = "Risk Time (days)",
+       y = "Count")
+```
+plot the distribution of your survival times (or risk times) to identify unusual gaps or outliers.
+
+create histograms or density plots of your covariates to detect skewness or extreme values.
+
+summarize the number of events and censoring across time intervals to check for consistency.
+
+
+# Assumptions
+
+## proportional hazards assumption
+
+
+Residual plot
+```{r}
+
+library(survival)
+
+coxph_model <- coxph(Surv(risk_time_art, risk_art_flag) ~ treated + strata(Year) + risk_art_flag + comorbidity + IncomeLevel, data = data_cvd)
+
+cox.zph(coxph_model)
+```
+
+Kaplan–Meier curves: These plot the survival probability over time. By grouping your data (e.g., by IncomeLevel or treated status), you can see if the curves are parallel, which is expected under proportional hazards.
+```{r}
+library(survival)
+library(ggfortify)
+
+km_fit <- survfit(Surv(risk_time_art, risk_art_flag) ~ IncomeLevel, data = data_cvd)
+autoplot(km_fit) +
+  labs(title = "Kaplan–Meier Curves by IncomeLevel",
+       x = "Time (days)",
+       y = "Survival probability")
+
+
+km_fit <- survfit(Surv(risk_time_art, risk_art_flag) ~ comorbidity, data = data_cvd)
+autoplot(km_fit) +
+  labs(title = "Kaplan–Meier Curves by IncomeLevel",
+       x = "Time (days)",
+       y = "Survival probability")
+```
+
+
+```{r}
+library(broom)
+library(ggplot2)
+
+# Fit the KM model stratified by IncomeLevel
+km_fit <- survfit(Surv(risk_time_art, risk_art_flag) ~ IncomeLevel, data = data_cvd)
+
+# Create a tidy data frame of survival estimates at specific time points
+surv_df <- broom::tidy(km_fit, times = seq(0, max(data_cvd$risk_time_art), by = 100))
+
+# Note: The 'strata' column indicates the IncomeLevel groups.
+# Suppose you also have a 'treated' variable in your original data and you want to facet by that.
+# You may need to merge that information if not already included.
+# For this example, assume 'surv_df' already includes a 'treated' variable.
+
+ggplot(surv_df, aes(x = time, y = estimate, color = strata)) +
+  geom_step() +
+  #facet_wrap(~ treated) +
+  labs(
+    title = "Cumulative Hazard by IncomeLevel and Treatment",
+    x = "Time (days)",
+    y = "Survival probability (transformed to cumulative hazard)"
+  ) +
+  theme_bw()
+```
+
+```{r}
+km_fit <- survfit(Surv(risk_time_art, risk_art_flag) ~ group_variable, data = data_cvd)
+
+# Base R approach:
+plot(km_fit, fun = "cloglog", xlab = "Time", ylab = "log(-log(S(t)))")
+
+# Or with survminer:
+library(survminer)
+ggsurvplot(km_fit, fun = "cloglog")
+```
+
+## check for NA
+
+```{r}
+data_cvd %>%
+  summarise(
+    missing_risk_time = sum(is.na(risk_time_art)),
+    missing_event = sum(is.na(risk_art_flag)),
+    missing_treated = sum(is.na(treated)),
+    missing_comorbidity = sum(is.na(comorbidity)),
+    missing_income = sum(is.na(IncomeLevel))
+  )
+```
+
+https://arnaugarciagrbio.github.io/GofCens/articles/Goodness_of_fit_Tests.html
+
+```{r}
+library("GofCens")
+
+
+survfit(Surv(risk_time_art, risk_art_flag) ~ group_variable, data = data_cvd)
+
+
+kmPlot(Surv(risk_time_art, risk_art_flag) ~ 1, data_cvd, distr = c("normal", "weibull", "lognormal"), betaLimits = c(.9, 1),
+       prnt = TRUE, ggp = TRUE) +
+  ylimit(.9, 1)
+
+
+probPlot(Surv(risk_time_art, risk_art_flag) ~ 1, data_cvd, "lognorm", plots = c("PP", "QQ", "SP"),
+         ggp = TRUE, m = matrix(1:3, nr = 1))
+```
+
+
+In order to estimate the median and model the survival times parametrically, we need to know which distribution is the most appropriate distribution. For this purpose, we take advantage of the cumhazPlot() function, which provides the following six cumulative hazard plots:
+```{r}
+cumhazPlot(Surv(risk_time_art, risk_art_flag) ~ 1, data_cvd, distr = c("exponential", "normal", "lognormal", "weibull", "logistic", "log-logistic"),
+           prnt = TRUE, ggp = TRUE)
+```

@@ -1,0 +1,331 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+
+
+# Libraries
+```{r}
+library(flexsurv)
+library(tidyverse)
+library(marginaleffects)
+library(survival)
+
+
+```
+
+
+# data
+
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
+
+
+```
+
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Cox main models and sociodemographics
+
+## data
+```{r}
+data_occ <- data_cvd |>
+  filter(!is.na(ssyk_WBHL_group)) |>
+  group_by(id_cluster) |>
+  mutate(n_cluster = n()) |>
+  ungroup() |>
+  filter(n_cluster > 4)
+
+data_mun <- data_cvd |>
+  filter(
+    !is.na(ssyk_WBHL_group),
+    !is.na(KommunSize),
+    !is.na(Place_of_origin)
+  ) |>
+  group_by(id_cluster) |>
+  mutate(n_cluster = n()) |>
+  ungroup() |>
+  filter(n_cluster > 4)
+
+
+```
+
+## models
+
+```{r}
+fits_m <- read_rds(here::here("..", "results", "models", "cox_ten_year_m.rds"))
+
+# lifestyle fits
+# fit_life <- read_rds(
+#           here::here("..", "results", "models", "ten_yr_lifestyle_interaction_fits.rds")
+# )
+```
+
+
+```{r}
+
+# Method 1: Using marginaleffects (recommended for complex interactions)
+# This is particularly good for models with interactions and provides
+# average marginal effects
+
+extract_with_marginaleffects <- function(fits_list) {
+  # Extract main treatment effects for models without interactions
+  main_effects <- map_dfr(
+    fits_list[1:5],
+    ~ {
+      .x |>
+        avg_comparisons(
+          by = "treated",
+          type = "lp",
+          transform = "exp"
+        ) |>
+        as_tibble() |>
+        select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+    },
+    .id = "model"
+  )
+
+  # Extract interaction effects for models 6-10
+  interaction_effects <- list()
+
+  # Model 6: treated * Sex interaction
+  interaction_effects$m6 <- fits_list$m6 |>
+    avg_comparisons(
+      by = "treated",
+      variables = "Sex",
+      type = "lp",
+      transform = "exp"
+    ) |>
+    as_tibble() |>
+    select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+
+  # Model 7: treated * age_group interaction
+  interaction_effects$m7 <- fits_list$m7 |>
+    avg_comparisons(
+      by = "treated",
+      variables = "age_group",
+      type = "lp",
+      transform = "exp"
+    ) |>
+    as_tibble() |>
+    select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+
+  # Model 8: treated * occupation interaction
+  interaction_effects$m8 <- fits_list$m8 |>
+    avg_comparisons(
+      by = "treated",
+      variables = "ssyk_WBHL_group",
+      type = "lp",
+      transform = "exp"
+    ) |>
+    as_tibble() |>
+    select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+
+  # Model 9: treated * income interaction
+  interaction_effects$m9 <- fits_list$m9 |>
+    avg_comparisons(
+      by = "treated",
+      variables = "IncomeLevel_CSFVI",
+      type = "lp",
+      transform = "exp"
+    ) |>
+    as_tibble() |>
+    select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+
+  # Model 10: dose-response effect
+  interaction_effects$m10 <- fits_list$m10 |>
+    avg_comparisons(
+      by = "treated",
+      variables = "n_tests_within_5_fac_vs_ctrl",
+      type = "lp",
+      transform = "exp"
+    ) |>
+    as_tibble() |>
+    select(term, contrast, treated, estimate, conf.low, conf.high, p.value)
+
+  return(list(
+    main_effects = main_effects,
+    interaction_effects = interaction_effects
+  ))
+}
+
+
+results <- extract_with_marginaleffects(fits_m)
+
+
+results |>
+  as_tibble() |>
+  mutate(
+    hr_ci = sprintf("%.2f (%.2f-%.2f)", estimate, conf.low, conf.high)
+  )
+
+
+write_rds(here::here(
+  "..",
+  "results",
+  "models",
+  "cox_ten_year_marginal_effects.rds"
+))
+```
+
+
+
+
+
+
+
+
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# main model contrasts
+## Interaction effects
+
+
+```{r}
+get_interaction_comparisons <- function(fit, var_name) {
+  # extract model frame and levels
+  mf <- model.frame(fit)
+  levs <- if (is.factor(mf[[var_name]])) {
+    levels(mf[[var_name]])
+  } else {
+    unique(mf[[var_name]])
+  }
+
+  # all 2‐way combinations of levels
+  combos <- combn(levs, 2, simplify = FALSE)
+
+  # for each combo, run avg_comparisons and bind into one tibble
+  purrr::map_dfr(
+    combos,
+    ~ {
+      vars <- setNames(list(c(.x[1], .x[2])), var_name)
+
+      fit |>
+        avg_comparisons(
+          variables = vars,
+          by = "treated",
+          comparison = "lnoravg", # genomsnittligt log odds ratio, can also use: type      = "lp",
+          transform = "exp"
+        ) |>
+        as_tibble() |>
+        mutate(
+          interaction = var_name,
+          comparison = paste(.x[1], "vs", .x[2])
+        )
+    }
+  )
+}
+
+# define which models have interactions and their variable names
+interaction_models <- list(
+  m6 = "Sex",
+  m8 = "ssyk_WBHL_group",
+  m7 = "age_group",
+  m9 = "IncomeLevel_CSFVI",
+  m10 = "n_tests_within_5_fac_vs_ctrl"
+)
+
+# run for each model and store results in a named list
+interaction_results <- purrr::imap(
+  interaction_models,
+  ~ {
+    model_key <- .y # e.g. "m6"
+    var_name <- .x # e.g. "Sex"
+
+    get_interaction_comparisons(
+      fit = fits_m[[model_key]],
+      var_name = var_name
+    )
+  }
+)
+
+# combine into one tibble with a model column, if desired
+all_interactions <- purrr::imap_dfr(
+  interaction_results,
+  ~ mutate(.x, model = .y)
+)
+
+all_interactions |> print(n = 100)
+
+write_csv(
+  all_interactions,
+  here::here(
+    "..",
+    "results",
+    "tables",
+    "cox_ten_year_interactions_main_estimates.csv"
+  )
+)
+```
+
+```{r}
+# antag all_interactions är din tibble
+table_df <- all_interactions |>
+  # formatera estimate och konf.int
+  mutate(
+    estimate = sprintf("%.2f", estimate),
+    conf.low = sprintf("%.2f", conf.low),
+    conf.high = sprintf("%.2f", conf.high),
+    or_ci = paste0(estimate, " (", conf.low, "–", conf.high, ")")
+  ) |>
+  select(model, interaction, comparison, treated, or_ci) |>
+  # bred layout: en kolumn per treated-nivå
+  pivot_wider(
+    names_from = treated,
+    values_from = or_ci,
+    names_prefix = ""
+  ) |>
+  # sortera gärna
+  arrange(model, interaction, comparison)
+
+# visa resultat
+print(table_df, n = nrow(table_df))
+```
+
+## testing
+
+
+works
+```{r}
+fits_m$m7 |>
+  avg_comparisons(
+    variables = list(age_group = c("<35", "35–49")), # Only these vs reference
+    by = "treated",
+    type = "lp",
+    transform = "exp"
+  ) |>
+  as_tibble()
+
+fits_m$m7 |>
+  avg_comparisons(
+    variables = list(age_group = c("<35", "≥50")), # Only these vs reference
+    by = "treated",
+    type = "lp",
+    transform = "exp"
+  ) |>
+  as_tibble()
+
+fits_m$m7 |>
+  avg_comparisons(
+    variables = list(age_group = c("35–49", "≥50")), # Only these vs reference
+    by = "treated",
+    type = "lp",
+    transform = "exp"
+  ) |>
+  as_tibble()
+
+
+fits_m$m1 |>
+  avg_comparisons(
+    variables = list(treated = c("Control", "HPA")), # Only these vs reference
+    # by = "treated",
+    type = "lp",
+    transform = "exp"
+  ) |>
+  as_tibble()
+
+```

@@ -1,13 +1,31 @@
 ---
-title: "Untitled"
-format: html
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
 
+
+# Description
+This script performs the harmonization of diagnosis codes from different versions of the International Classification of Diseases (ICD), aligning historical codes (ICD-7, ICD-8, ICD-9) to ICD-10 using a custom conversion key.
 
 Translation of ICD-9 codes to ICD-10 codes is a complex task that usually requires a detailed mapping table, because there is not always an exact equivalent between the codes in these two systems. This means that it will not be an exact translation.
 
 ```{r}
-library(tidyverse)
+library(tidyverse) # for data wrangling (dplyr, tidyr, readr, stringr, etc.)
+library(here) # for platform-independent file paths
+library(lubridate) # for date conversion and manipulation (e.g., ymd())
+library(haven) # for reading SAS files (.sas7bdat)
 ```
 
 # read in and update ICD-convert_key
@@ -18,7 +36,7 @@ convert_key <-
 read_delim(
   here::here("..", "data", "ICD_codes_20210820.csv"),
   delim = ";",
-  skip = 1,        # increase if there are lines to skip
+  skip = 1,
   col_names = TRUE
 )
 
@@ -41,7 +59,7 @@ mapped_codes <- tribble(
   "148",   "ICD9",   17, "C12", "Malignant neoplasm of pyriform sinus/hypopharynx area",       "approx",
   "175",   "ICD9",    4, "C50", "Malignant neoplasm of male breast",                           "approx",
   "19",    "ICD9",    4, "C80", "Malignant neoplasm, unspecified site",                        "approx",
-  
+
   #------------------------------------------------------
   # ICD8
   #------------------------------------------------------
@@ -97,8 +115,8 @@ mapped_codes <- tribble(
   "411",   "ICD7",   8,  "I20", "Angina pectoris (older usage)",                              "approx"
 )
 
-icd_code_convert_key <- 
-mapped_codes |> filter(certainty != "unknown") |> 
+icd_code_convert_key <-
+mapped_codes |> filter(certainty != "unknown") |>
   bind_rows(convert_key)
 
 
@@ -106,12 +124,7 @@ write_csv(icd_code_convert_key, here::here("..", "data", "ICD_codes_convert_key_
 ```
 
 
-- Extract ICD-diagnoses from patient registry and the death registry.
-- Merge and select cases based on the base dataset.
-- Create time based variables
-  - From HPA one year forward
-  - From HPA five year forward
-
+Extract ICD diagnoses from patient and death registries, then merge and select based on a base dataset. Time-based variables will also be created, specifically one year and five years from the index event (HPA):
 ```{r}
 
 # icd convert key
@@ -130,47 +143,48 @@ patreg_inpat <- haven::read_sas(here::here("..", "..", "..", "..",
 
 ```
 
-	•	The code standardizes diagnosis codes by first converting all raw diagnosis entries (from multiple ICD versions) to a common format—that is, to the level of one letter followed by two digits (i.e. the ICD10 chapter level). any characters beyond that are dropped so that the analysis uses a consistent level of detail.
-	•	It assigns the ICD version based on the admission year (AR):
-• AR ≤ 1968 is assigned ICD7
-• AR ≤ 1986 is assigned ICD8
-• AR ≤ 1996 is assigned ICD9
-• otherwise, ICD10 is assumed.
-	•	A special rule is added for Skåne: because the region switched to ICD10 later (in 1998), if the admission year is 1997 and the diagnosis code does not start with a letter, it is recoded as ICD9.
-	•	The code then “cleans” the diagnosis code by:
-• For ICD7 and ICD8: keeping only the first three digits (discarding any comma and the following text).
-• For ICD9: removing any trailing letter and additional characters (so that, for example, codes like “205B0”, “184A07”, or “410AA1” are reduced to just the first three digits).
-	•	Finally, the cleaned dataset is merged with a conversion key (using a left join) that maps the original ICD codes to their approximate ICD10 counterparts.And pivoted back to wide. This final merged dataset (version_merged) enables consistent analysis across different periods by aligning older ICD codes to a modern ICD10 framework.
+Standardizing diagnosis codes and identifying ICD versions based on admission year:
+	•	Diagnosis codes are cleaned and truncated to the ICD-10 chapter level (one letter followed by two digits).
+	•	ICD version is assigned based on AR:
+	•	AR ≤ 1968 → ICD7
+	•	AR ≤ 1986 → ICD8
+	•	AR ≤ 1996 → ICD9
+	•	AR > 1996 → ICD10
+	•	Exception for Skåne in 1997, where numeric-only codes are reclassified as ICD9.
+
+For ICD7 and ICD8, only the first three digits are retained. For ICD9, trailing letters and additional characters are stripped (e.g., 205B0 → 205).
+
+Finally, codes are merged with the conversion key to obtain harmonized ICD-10 chapters for analysis.
 ```{r}
 
-patreg_inpat |> group_by(LopNr, HDIA, AR, INDATUMA,UTDATUMA) |> 
+patreg_inpat |> group_by(LopNr, HDIA, AR, INDATUMA,UTDATUMA) |>
   summarise(n=n()) |> arrange(desc(n))
 
 patreg_long <-
-  patreg_inpat |> 
+  patreg_inpat |>
   # remove duplicates
-  distinct() |> 
+  distinct() |>
   mutate(
     indatum = ymd(INDATUMA),
     utdatum = ymd(UTDATUMA),
-    #across(everything(), str_trim), 
+    #across(everything(), str_trim),
     .after = AR,
     .keep = "unused",
-    
-  ) |> 
+
+  ) |>
   pivot_longer(cols = contains("DIA"),
                names_to = "dia_version",
                values_to = "dia",
                values_drop_na = TRUE
-               ) |> 
-  filter(dia != "" & dia != "[BLANKAD]") |> 
+               ) |>
+  filter(dia != "" & dia != "[BLANKAD]") |>
   mutate(
     dia = str_trim(dia),
       icd_version = case_when(
       AR <= 1968 ~ "ICD7",
       AR <= 1986 ~ "ICD8",
       AR <= 1996 ~ "ICD9",
-      TRUE ~ "ICD10" 
+      TRUE ~ "ICD10"
     ),
    icd_version = if_else(
 # Skåne switched to icd 10 later than other, in 1998, so if there are icd codes that look like icd 9 in 1997
@@ -192,24 +206,24 @@ patreg_long <-
   )
 
 version_merged <-
-  patreg_long |> 
+  patreg_long |>
   left_join(
     convert_key,
     by = c("dia" = "original_icd", "icd_version" = "converted_from_icd")
-  ) |> 
+  ) |>
   mutate(
       dia = coalesce(new_icd10_code, dia)
-  ) |> 
+  ) |>
   group_by(LopNr, AR, ALDER, indatum, utdatum, dia_version) %>%
   mutate(dia_id = row_number()) %>%
-  ungroup() |> 
+  ungroup() |>
   # remove duplicates (can have been added after removing [BLANKAD] and recoding ICD codes)
   filter(dia_id == 1)
 
 version_merged_wide <- version_merged |>
-  select(LopNr, AR, ALDER, indatum, utdatum, dia, dia_version) |> 
+  select(LopNr, AR, ALDER, indatum, utdatum, dia, dia_version) |>
   pivot_wider(
-    id_cols = c(LopNr, AR, ALDER, indatum, utdatum),  
+    id_cols = c(LopNr, AR, ALDER, indatum, utdatum),
     names_from = c(dia_version),
     values_from = dia,
     values_fill = list(dia = NA)
@@ -219,15 +233,15 @@ version_merged_wide <- version_merged |>
 
 
 # not merged icd codes from icd 7,8,9
-# version_merged |> filter(is.na(new_icd10_code) & !is.na(dia)) |> count(dia, AR, icd_version) |> 
-#   filter(icd_version != "ICD10") |> arrange(desc(n)) |> 
-#   group_by(dia, icd_version) |> 
-#   summarise(n= sum(n))|> arrange(desc(icd_version),desc(n)) 
+# version_merged |> filter(is.na(new_icd10_code) & !is.na(dia)) |> count(dia, AR, icd_version) |>
+#   filter(icd_version != "ICD10") |> arrange(desc(n)) |>
+#   group_by(dia, icd_version) |>
+#   summarise(n= sum(n))|> arrange(desc(icd_version),desc(n))
 
 ```
 
 
-
+Save data
 ```{r}
  write_csv(version_merged_wide, here::here("..", "..", "..", "..",
 "HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
@@ -250,12 +264,12 @@ deathreg <- haven::read_sas(here::here("..", "..", "..", "..",
 
 
 ```{r}
-deathreg |> 
+deathreg |>
   pivot_longer(
     cols = contains("ORSAK"),
     names_to = "dia_version",
-    values_to = "dia") |> 
-  filter(dia != "") |> 
+    values_to = "dia") |>
+  filter(dia != "") |>
   filter(!str_detect(dia, "^[A-Za-z]\\d{2}$")) |> select(dia, ICD)
 
 
@@ -282,7 +296,7 @@ deathreg |>
     ULORSAK == "410" ~ "I21",  # acute myocardial infarction
     ULORSAK == "952" ~ "S06",  # intracranial injury
     ULORSAK == "_AV" ~ "Z99",  # administrative/other category
-    TRUE ~ ULORSAK)) |> 
+    TRUE ~ ULORSAK)) |>
   select(LopNr, DODSDAT, ULORSAK, contains("MORSA")) |>
   mutate(
     DODSDAT = case_when(
@@ -308,4 +322,3 @@ deathreg |>
 "HPI (DNR XXXXXX)", "Data HPI registeruttag 2025",
 "data_socialstyrelsen", "data_clean", "dodsorsaksreg", "deathreg_data_clean_2025-02-26.csv"))
 ```
-

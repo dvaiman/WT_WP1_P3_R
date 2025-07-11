@@ -1,13 +1,29 @@
+----
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
-title: "Untitled"
-format: html
----
+
+# Description
+
+RMST difference plots over three time points.#
 
 ```{r}
 library(tidyverse)
 ```
 
-
+# Data RMSTD
 
 ```{r}
 rmst_models <- read_rds(
@@ -36,7 +52,7 @@ rmst_models <- read_rds(
 #   Occupation5  = lst_occ[[5]]
 # )
 
-attr(rmst_models$Age_grp3, "standpred_contrast") 
+attr(rmst_models$HPA_3_test, "standpred_contrast")
 
 rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
   # extract the contrast‐table
@@ -47,9 +63,9 @@ rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
       Model    = model_name,
       Subgroup = case_when(
         contrast == "treated=HPA vs treated=Control"                                                                 ~ "Overall",
-        contrast == "n_tests_within_5_fac=HPA, 1 test vs n_tests_within_5_fac=Control"                                ~ "HPA, 1 test",
-        contrast == "n_tests_within_5_fac=HPA, 2 tests vs n_tests_within_5_fac=Control"                               ~ "HPA, 2 tests",
-        contrast == "n_tests_within_5_fac=HPA, ≥3 tests vs n_tests_within_5_fac=Control"                              ~ "HPA, ≥3 tests",
+        contrast == "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 1 test vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 1 test"          ~ "HPA, 1 test",
+        contrast == "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 2 tests"        ~ "HPA, 2 tests",
+        contrast == "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, ≥3 tests"             ~ "HPA, ≥3 tests",
         contrast == "treated=HPA, Sex=Men vs treated=Control, Sex=Men"                                               ~ "Men",
         contrast == "treated=HPA, Sex=Women vs treated=Control, Sex=Women"                                           ~ "Women",
         contrast == "treated=HPA, Age=25 vs treated=Control, Age=25"                                                 ~ "Age 25",
@@ -58,7 +74,7 @@ rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
         contrast == "treated=HPA, Age=55 vs treated=Control, Age=55"                                                 ~ "Age 55",
         contrast == "treated=HPA, Age=65 vs treated=Control, Age=65"                                                 ~ "Age 65",
         contrast == "treated=HPA, age_group=<35 vs treated=Control, age_group=<35"                                   ~ "Age grp <35",
-        contrast == "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49"                               ~ "Age grp 35-44",
+        contrast == "treated=HPA, age_group=35–49 vs treated=Control, age_group=35–49"                               ~ "Age grp 35-49",
         contrast == "treated=HPA, age_group=≥50 vs treated=Control, age_group=≥50"                                   ~ "Age grp ≥50",
         contrast == "treated=HPA, ssyk_WBHL_group=White-collar high-skilled vs treated=Control, ssyk_WBHL_group=White-collar high-skilled"
                                                                                                                      ~ "White-collar high-skilled",
@@ -70,10 +86,10 @@ rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
                                                                                                                      ~ "Blue-collar low-skilled",
         TRUE                                                                                                          ~ NA_character_
       ),
-        Time  = case_when(time == 1826 ~ "5 yr", 
+        Time  = case_when(time == 1826 ~ "5 yr",
                           time == 3653 ~ "10 yr",
                           time == 7306 ~ "20 yr"),
-      τ_years  = time / 365.25, 
+      τ_years  = time / 365.25,
       ΔRMST = sprintf("%.2f (%.2f–%.2f)",
                       difference,
                       difference_lci,
@@ -90,9 +106,9 @@ rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
       months_gain_per_100py = difference / τ_years / 12 * 100
                                                 # years gained per 100 py
     ) %>%
-    select(Model, Subgroup, Time, ΔRMST, difference, difference_lci, difference_uci, years_gain_per_1000, years_gain_per_1000_lci, years_gain_per_1000_uci, months_gain_per_100py) 
-})
-  
+    select(Model, Subgroup, Time, ΔRMST, difference, difference_lci, difference_uci, years_gain_per_1000, years_gain_per_1000_lci, years_gain_per_1000_uci, months_gain_per_100py)
+}) |>  filter(Model != "HPA count")
+
 rmst_table |> print(n = Inf)
 
 # rmst_wide <- rmst_table %>%
@@ -115,8 +131,8 @@ rmst_table |> print(n = Inf)
 #                         "Unknown occupation"
 #                       ))
 #   ) %>%
-#   arrange(Model, Subgroup) |> 
-#   select(-Model) |> 
+#   arrange(Model, Subgroup) |>
+#   select(-Model) |>
 #   # 1) rename the columns
 #   rename(
 #     `Group` = Subgroup,
@@ -130,7 +146,7 @@ rmst_table |> print(n = Inf)
 # 2) create a forrest plot with the RMST differences
 
 rmst_plot_data <-
-rmst_table |> 
+rmst_table |>
     mutate(
       Model    = factor(Model,    levels = c("Overall", "HPA count", "Sex1", "Sex2",
                   "Age_grp1", "Age_grp2", "Age_grp3")),
@@ -139,20 +155,20 @@ rmst_table |>
   "HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests",
   "Men", "Women",
   "Age 25", "Age 35", "Age 45", "Age 55", "Age 65",
-  "Age grp <35", "Age grp 35-44", "Age grp ≥50",
+  "Age grp <35", "Age grp 35-49", "Age grp ≥50",
   "White-collar high-skilled", "White-collar low-skilled",
   "Blue-collar high-skilled", "Blue-collar low-skilled"
 )),
 Subgroup = fct_rev(Subgroup),
       Time     = factor(Time,     levels = c("5 yr", "10 yr", "20 yr")),
 Time = fct_rev(Time)
-    ) 
+    )
 
-
-rmst_plot_data |> 
+rmst_plot_data |> print(n = Inf)
+rmst_plot_data |>
 ggplot(aes(x = years_gain_per_1000, y = Subgroup, color = Time)) +
-  geom_point(aes(shape = Time), size = 3, position = position_dodge(width = 1) ) +
-  geom_errorbarh(aes(xmin = years_gain_per_1000_lci, xmax = years_gain_per_1000_uci, group = Time), height = 0.2, position = position_dodge(width = 1) ) +
+  geom_point(aes(shape = Time), size = 3 ) +
+  geom_errorbarh(aes(xmin = years_gain_per_1000_lci, xmax = years_gain_per_1000_uci, group = Time), height = 0.2) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
   scale_shape_manual(values = c(16, 17, 18)) +
   labs(
@@ -167,7 +183,7 @@ ggplot(aes(x = years_gain_per_1000, y = Subgroup, color = Time)) +
   )
 
 
-rmst_plot_data |> 
+rmst_plot_data |>
 ggplot(aes(x = difference, y = Subgroup, color = Time)) +
   geom_point(aes(shape = Time), size = 3, position = position_dodge(width = 1) ) +
   geom_errorbarh(aes(xmin = difference_lci, xmax = difference_uci, group = Time), height = 0.2, position = position_dodge(width = 1) ) +
@@ -186,7 +202,7 @@ ggplot(aes(x = difference, y = Subgroup, color = Time)) +
 
 
 
-rmst_plot_data %>% 
+rmst_plot_data %>%
   ggplot(aes(x = difference,          # days gained per person
              y = Subgroup,
              colour = Time)) +
@@ -206,7 +222,7 @@ rmst_plot_data %>%
             hjust = -0.2,
             size = 3) +
 
-             
+
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey") +
   scale_colour_manual(values = c("grey40", "#f57c52", "#3a7880")) +
   scale_shape_manual(values = c(16, 17, 18)) +
@@ -218,7 +234,7 @@ rmst_plot_data %>%
   ) +
    guides(colour = guide_legend(reverse = TRUE),
          shape  = guide_legend(reverse = TRUE))  +
-  
+
   theme_minimal(base_size = 11, base_family = "sans") +
   theme(
     legend.position   = "bottom",
@@ -228,17 +244,20 @@ rmst_plot_data %>%
     axis.title.x.top  = element_text(margin = margin(b = 8)),
     plot.title        = element_text(face = "bold", size = 12, hjust = .5)
   ) +
-  
+
   labs(title = "difference in restricted mean CVD‑free time (Δ‑rmst) by subgroup")
 
 # difference in restricted mean CVD‑free time (years) per 1 000 individuals
 #"difference in restricted mean CVD‑free time (days) vs controls"
-# 
+#
 ```
 
 
 
-# plot RMST differences by subgroup
+# Area plot
+RMST differences by subgroup
+
+## data
 ```{r}
 
 
@@ -247,7 +266,7 @@ font_add_google("Roboto", "roboto")
 showtext_auto()
 
 # --- 1. wrangle -----------------------------------------------------
-rmst_line_data <- rmst_table %>%                               
+rmst_line_data <- rmst_table %>%
   mutate(
     groups = case_when(
       str_starts(Model, "Age") ~ "Age group",
@@ -259,7 +278,7 @@ rmst_line_data <- rmst_table %>%
     time_years = readr::parse_number(Time),                    # 5 / 10 / 20
     # keep factor ordering you already set up
     Subgroup   = fct_rev(Subgroup)
-  )%>% 
+  )%>%
 
   ## ── add τ = 0 for every group / subgroup ─────────────────────────
   complete(Subgroup, groups,
@@ -273,7 +292,7 @@ rmst_line_data <- rmst_table %>%
              difference_uci             = 0,
              ΔRMST                      = "0",    # text label if you use it
              Time                       = "0 yr"  # optional, for consistency
-           )) %>% 
+           )) %>%
   arrange(Model, Subgroup, time_years)
 
 rmst_line_data |>  print(n = Inf)
@@ -293,19 +312,19 @@ rmst_line_data <- rmst_table %>%
   )
 
 ## ---- 2. make ONE baseline row per (Model, Subgroup) ----------------
-baseline <- rmst_line_data %>% 
+baseline <- rmst_line_data %>%
   distinct(Model, Subgroup, groups) %>%          # one per curve
   mutate(
     time_years                   = 0,
-    years_gain_per_1000          = 0,
-    years_gain_per_1000_lci      = 0,
-    years_gain_per_1000_uci      = 0,
+    difference          = 0,
+    difference_lci      = 0,
+    difference_uci      = 0,
     ΔRMST                        = "0",          # if you keep the label
     Time                         = "0 yr"        # optional
   )
 
-rmst_line_data0 <- bind_rows(rmst_line_data, baseline) %>% 
-  arrange(Model, Subgroup, time_years) |> 
+rmst_line_data0 <- bind_rows(rmst_line_data, baseline) %>%
+  arrange(Model, Subgroup, time_years) |>
     mutate(Subgroup = fct_reorder(Subgroup,
                                 difference,   # or years_gain_per_1000
                                 .desc = TRUE))
@@ -316,17 +335,24 @@ my_subgroup_cols <- c(
   "Men"   = "#418286",
   "Women" = "#e1800f",
   "Age grp <35"   = "#e1800f",
-  "Age grp 35–44" = "grey30",
+  "Age grp 35-49" = "grey30",
   "Age grp ≥50"   = "#418286",
   "HPA, 1 test" = "#418286",
   "HPA, 2 tests" = "grey30",
   "HPA, ≥3 tests" = "#e1800f"
 )
 
+```
+
+
+## plot
+
+```{r}
+
 # --- 2. plot --------------------------------------------------------
 ggplot(rmst_line_data0 ,
        aes(x = time_years,
-           y = years_gain_per_1000,
+           y = difference,
            group = Subgroup,
            colour = Subgroup,
            fill   = Subgroup)
@@ -335,27 +361,27 @@ ggplot(rmst_line_data0 ,
 
   ## shade *area under the curve* -------------------------
 geom_line()+
-  geom_ribbon(aes(ymin = 0, ymax = years_gain_per_1000),
-              alpha = 1, linewidth = 0)      +              
-  
+  geom_ribbon(aes(ymin = 0, ymax = difference),
+              alpha = 1, linewidth = 0)      +
+
   # geom_text(aes(label = Subgroup, x= 3),
   #           position = position_dodge(width = 0.7),
   #           data = rmst_line_data0 %>% filter(time_years == 20),
   #           hjust = -0.2,
   #           size = 3) +
-  
-    geom_text(data = rmst_line_data0 %>% 
+
+    geom_text(data = rmst_line_data0 %>%
   filter(time_years == 20),
             aes(label = Subgroup,
                 color = Subgroup),
             position = position_nudge(x = 1),   # nudge out to the right
-            hjust = 0, size = 3) +
-  
+            hjust = 0, size = 3.5) +
+
     geom_point(data = rmst_line_data0 %>% filter(time_years > 0),
              position = position_dodge(width = 1.2),
              color = "grey10") +
-   geom_errorbar(aes(ymin = years_gain_per_1000_lci,
-                    ymax = years_gain_per_1000_uci),
+   geom_errorbar(aes(ymin = difference_lci,
+                    ymax = difference_uci),
                  position = position_dodge(width = 1.2),
                 width = 0,            # no horizontal whiskers
                 linewidth = 1,
@@ -368,13 +394,23 @@ geom_line()+
   ## connect the points -----------------------------------
                                  # markers
 
+  scale_y_continuous(
+    name = "RMST Δ (days), HPAs vs controls",
+    expand = expansion(mult = c(0, .05)),
+    sec.axis = sec_axis(
+      trans = ~ . * 1000 / 365.25,
+      name = "RMST Δ (years / 1,000 persons), HPAs vs controls",
+      breaks = c(0, 27, 55, 82, 110),
+    )
+  ) +
+
   ## axes & guides ----------------------------------------
  scale_x_continuous(
-   position = "top",  
-   limits = c(0, 25),
+   position = "top",
+   limits = c(0, 28),
    breaks = c(0, 5, 10, 20),
    labels = c("0 years\nfrom first\nHPA", "5", "10", "20")) +
-scale_y_continuous(expand = expansion(mult = c(0, .05)))  + # 0 at baseline
+#scale_y_continuous(expand = expansion(mult = c(0, .05)))  + # 0 at baseline
   scale_colour_manual(values = my_subgroup_cols) +
   scale_fill_manual(values = my_subgroup_cols) +
  # coord_flip() +
@@ -392,13 +428,276 @@ labs(
   theme_minimal(base_size = 11, base_family = "Roboto") +
     theme(
        text = element_text(family = "Roboto"),
+       axis.title = element_text(color = "grey35"),
       legend.position = "none",                                # facets are labelled
       panel.spacing    = unit(1, "lines"),
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
-          strip.text       = element_blank(),   
+          strip.text       = element_blank(),
     strip.background = element_blank()
     )
 ```
 
-scale_colour_manual(values = c("grey40", "#f57c52", "#3a7880")
+## save
+```{r}
+ggsave(
+  here::here("..", "results", "figures", "rmstd_area_plot.pdf"),
+  width = 210, height = 150, units = "mm"
+)
+```
+
+
+
+
+
+# Bar plot
+
+## data
+
+```{r}
+data_clean <- rmst_plot_data |>
+ filter(!is.na(Subgroup)) |>
+  mutate(
+    time_numeric = readr::parse_number(as.character(Time)),
+    # Create clean subgroup labels
+    subgroup_clean = case_when(
+      Subgroup == "Overall" ~ "Overall",
+      Subgroup == "Men" ~ "Men",
+      Subgroup == "Women" ~ "Women",
+      Subgroup == "Age grp <35" ~ "Age <35",
+      Subgroup == "Age grp 35-49" ~ "Age 35-49",
+      Subgroup == "Age grp ≥50" ~ "Age ≥50",
+      str_detect(as.character(Subgroup), "HPA") ~ as.character(Subgroup),
+      TRUE ~ as.character(Subgroup)
+    ),
+    # Create category for faceting/coloring
+    category = case_when(
+      Subgroup == "Overall" ~ "Overall",
+      Subgroup %in% c("Men", "Women") ~ "Sex",
+      str_detect(as.character(Subgroup), "Age grp") ~ "Age Group",
+      str_detect(as.character(Subgroup), "HPA") ~ "HPA Count",
+      str_detect(as.character(Subgroup), "collar") ~ "Occupation",
+      TRUE ~ "Other"
+    )
+  ) |>
+  mutate(
+   Model = if_else(is.na(Model), "HPA Count", Model),
+  )
+
+print(data_clean, n = Inf)
+
+# Check data before filtering
+print("Data summary before filtering:")
+print(table(data_clean$category))
+print("Unique subgroups:")
+print(unique(data_clean$Subgroup))
+
+# Apply filtering
+data_clean <- data_clean |>
+  filter(category %in% c("Overall", "Sex", "Age Group", "HPA Count"))
+
+```
+## plot
+```{r}
+library(tidyverse)
+library(ggrounded)
+## helper table – keep only the strata you want to show
+keep <- tribble(
+  ~category,   ~subgroup,
+  "Overall",   "Overall",
+  "Sex",       "Men",
+  "Sex",       "Women",
+  "Age Group", "Age <35",
+  "Age Group", "Age 35-49",
+  "Age Group", "Age ≥50",
+  "HPA Count", "HPA, 1 test",
+  "HPA Count", "HPA, 2 tests",
+  "HPA Count", "HPA, ≥3 tests"
+)
+
+## prepare data – ordered by 20-year benefit inside each category
+df_plot <- data_clean |>
+  semi_join(keep, by = c("category",
+                         "subgroup_clean" = "subgroup")) |>
+  mutate(
+    time_facet = factor(time_numeric,
+                        levels = c(5, 10, 20),
+                        labels = c("5 years", "10 years", "20 years"))
+  ) |>
+  group_by(category, subgroup_clean) |>
+  mutate(order_key = years_gain_per_1000[time_numeric == 20]) |>
+  ungroup() |>
+  group_by(category) |>
+  mutate(subgroup_clean = fct_reorder(subgroup_clean,
+                                      order_key, .desc = TRUE)) |>
+  ungroup()
+
+## compute a small x-offset so text sits nicely to the right
+text_nudge <- (max(df_plot$years_gain_per_1000_uci, na.rm = TRUE) -
+               min(df_plot$years_gain_per_1000_lci, na.rm = TRUE)) * 0.02
+
+## forest-style plot ---------------------------------------------------
+ggplot(df_plot,
+       aes(x = years_gain_per_1000,
+           y = subgroup_clean)) +
+
+  # dashed reference line at zero benefit
+  geom_vline(xintercept = 0, linetype = "dashed",
+             colour = "grey30") +
+
+  # horizontal bar from 0 → estimate
+  geom_segment(aes(x    = 0,
+                   xend = years_gain_per_1000,
+                   yend = subgroup_clean),
+               lineend = c('butt'),
+               linewidth = 12,
+               colour    = "steelblue") +
+
+
+    # geom_col_rounded(fill    = "grey80",
+    #                radius  = grid::unit(4, "pt"),
+    #                width   = 0.85) +
+
+  # 95 % confidence interval
+  geom_errorbarh(aes(xmin = years_gain_per_1000_lci,
+                     xmax = years_gain_per_1000_uci),
+                 height    = 0,
+                 linewidth = 1.2,
+                 color = "grey20") +
+
+  # numeric label just above the bar, centred on the point estimate
+  geom_text(aes(label = scales::number(years_gain_per_1000,
+                                       accuracy = 0.1)),
+            nudge_x = text_nudge,
+            nudge_y = 0.25,          # shift upward so it clears the bar
+            size    = 3.2,
+            hjust   = 0) +
+
+    geom_text(aes(label = paste0("(",
+      scales::number(years_gain_per_1000_lci, accuracy = 0.1),
+      "–",
+      scales::number(years_gain_per_1000_uci, accuracy = 0.1), ")"
+    )
+  ),
+            nudge_x = text_nudge,
+            nudge_y = -0.25,          # shift upward so it clears the bar
+            size    = 3.2,
+            hjust   = 0) +
+
+  facet_grid(rows  = vars(category),
+             cols  = vars(time_facet),
+             scales = "free_y",
+             space  = "free_y",
+             switch = "y") +
+
+  # turn off the x axis completely
+  scale_x_continuous(expand = expansion(mult = c(0, 0.9))) +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x        = element_blank(),
+    #axis.title.x       = element_blank(),
+    axis.ticks.x       = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.text.y       = element_text(angle = 0, face = "bold"),
+    strip.text.x       = element_text(face = "bold"),
+    panel.grid.major.y = element_blank(),
+    panel.spacing.x    = unit(1.2, "lines")
+  ) +
+
+  labs(
+    title    = "",
+    subtitle = "",
+    y        = NULL,
+    x = "Δ-RMST (years) per 1,000 individuals",
+    caption  = ""
+  )
+```
+
+## flipped
+
+```{r}
+library(tidyverse)
+library(ggrounded)   # devtools::install_github("botan/ggrounded")
+
+# ── 1. filter & prepare your plotting df (as before) ────────────────────
+df_plot <- data_clean |>
+  semi_join(
+    tribble(
+      ~category,   ~subgroup,
+      "Overall",   "Overall",
+      "Sex",       "Men",
+      "Sex",       "Women",
+      "Age Group", "Age <35",
+      "Age Group", "Age 35-44",
+      "Age Group", "Age ≥50",
+      "HPA Count", "HPA 0",
+      "HPA Count", "HPA 1",
+      "HPA Count", "HPA 2+"
+    ),
+    by = c("category", "subgroup_clean" = "subgroup")
+  ) |>
+  mutate(
+    time_facet = factor(time_numeric,
+                        levels = c(5, 10, 20),
+                        labels = c("5 years", "10 years", "20 years"))
+  ) |>
+  group_by(category, subgroup_clean) |>
+  mutate(order_key = difference[time_numeric == 20]) |>
+  ungroup() |>
+  group_by(category) |>
+  mutate(subgroup_clean = fct_reorder(subgroup_clean, order_key, .desc = TRUE)) |>
+  ungroup()
+
+# ── 2. draw with rounded bars (geom_col_rounded) ────────────────────────
+ggplot(df_plot, aes(x = subgroup_clean, y = difference)) +
+
+  # rounded‐end bars (exact length = difference)
+  geom_col_rounded(
+    radius = grid::unit(4, "pt"),
+    width  = 0.7,
+    fill   = "grey80",
+    colour = NA
+  ) +
+
+  # 95 % CI whiskers
+  geom_errorbar(
+    aes(ymin = difference_lci, ymax = difference_uci),
+    width = 0.2,
+    size  = 0.6
+  ) +
+
+  # numeric labels just beyond bar end
+  geom_text(
+    aes(label = scales::number(difference, accuracy = 0.1)),
+    hjust = -0.1,
+    size  = 3
+  ) +
+
+  # horizontal orientation
+  coord_flip() +
+
+  # one row per category, three cols for 5/10/20 y
+  facet_grid(category ~ time_facet,
+             scales = "free_y", space = "free_y") +
+
+  # drop the x‐axis (now vertical), keep a little padding
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+
+  labs(
+    title    = "Accumulated treatment benefit (ΔRMST)",
+    subtitle = "bars = point estimates • whiskers = 95 % CI",
+    x        = NULL,
+    y        = "ΔRMST (years)",
+    caption  = "Flexible parametric survival model, Swedish registers"
+  ) +
+
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.y        = element_text(size = 11),
+    axis.ticks.y       = element_blank(),
+    panel.grid.major.y = element_blank(),
+    strip.text.y       = element_text(angle = 0, face = "bold"),
+    strip.text.x       = element_text(face = "bold"),
+    panel.spacing.x    = unit(1.2, "lines")
+  )
+```

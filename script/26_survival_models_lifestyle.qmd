@@ -1,6 +1,18 @@
 ---
-title: "Lifestyle and related"
-format: html
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
 ---
 
 
@@ -64,21 +76,21 @@ get_hr <- function(fit, by_var) {
 
 ## data
 ```{r}
-data_occ  <- data_cvd |>                     
-  filter(!is.na(ssyk_WBHL_group)) |> 
-  group_by(id_cluster) |> 
-        mutate(n_cluster = n()) |> 
-        ungroup() |> 
-  filter(n_cluster > 4) 
+data_occ  <- data_cvd |>
+  filter(!is.na(ssyk_WBHL_group)) |>
+  group_by(id_cluster) |>
+        mutate(n_cluster = n()) |>
+        ungroup() |>
+  filter(n_cluster > 4)
 
-data_mun  <- data_cvd |>                    
+data_mun  <- data_cvd |>
   filter(!is.na(ssyk_WBHL_group),
          !is.na(KommunSize),
-         !is.na(Place_of_origin)) |> 
-  group_by(id_cluster) |> 
-        mutate(n_cluster = n()) |> 
-        ungroup() |> 
-  filter(n_cluster > 4) 
+         !is.na(Place_of_origin)) |>
+  group_by(id_cluster) |>
+        mutate(n_cluster = n()) |>
+        ungroup() |>
+  filter(n_cluster > 4)
 
 
 ```
@@ -135,14 +147,38 @@ fits_m <- list(
              data = data_occ),
 
   m9 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               n_tests_within_5_fac + Age + Sex +
+               treated * IncomeLevel_CSFVI + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag,
+             data = data_cvd),
+
+  m10 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * EducationLevel + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag,
+             data = data_cvd),
+
+  m11 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * SSYK + birth_cohort + Age + Sex +
+               comorbidity + cvd_art_before_HPA_flag,
+             data = data_occ |> filter(SSYK != "Military") |>
+               mutate(SSYK = fct_drop(SSYK))),
+
+    m12 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+               treated * n_tests_within_5_fac_vs_ctrl + Age + Sex +
                birth_cohort + comorbidity +
                cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
-             data = data_cvd)     # dose model (no treated term)
+             data = data_cvd |>
+               mutate(
+                 n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)
+               ))
+
+
 )
+
+write_rds(fits_m, here::here("..", "results", "models", "cox_ten_year_m.rds"))
+
 ```
 
-## main model (M1–M5) estimates 
+## main model (M1–M5) estimates
 
 ```{r}
 # helper just for the mains
@@ -151,14 +187,14 @@ get_main <- function(fit, model_id) {
     filter(term == "treatedHPA") %>%
     select(term, estimate, std.error, statistic, p.value, starts_with("conf")) %>%
     mutate(model = model_id, .before = 1)
-  
+
   mf     <- model.frame(fit)
   status <- mf[[1]][, "status"]
   dat    <- mf %>%
     mutate(event = status,
            arm   = if_else(treated %in% c(1, "HPA"),
                            "HPA", "Control"))
-  
+
   counts <- dat %>%
     group_by(arm) %>%
     summarise(n      = n(),
@@ -167,7 +203,7 @@ get_main <- function(fit, model_id) {
     pivot_wider(names_from  = arm,
                 values_from = c(n, events),
                 names_glue  = "{.value}_{arm}")
-  
+
   bind_cols(td, counts)
 }
 
@@ -183,12 +219,15 @@ tbl_main <- imap_dfr(fits_m[1:5], \(fit, nm) get_main(fit, nm))
 socio_by <- c(
   m6 = "Sex",
   m7 = "age_group",
-  m8 = "ssyk_WBHL_group"
+  m8 = "ssyk_WBHL_group",
+  m9 = "IncomeLevel_CSFVI",
+  m10 = "EducationLevel",
+  m11 = "SSYK"
 )
 
 # 2) run only models m6–m8, pulling the right by_var from socio_by
 tbl_int_sociodemographics <- imap_dfr(
-  fits_m[6:8],               # list entries m6, m7, m8
+  fits_m[6:11],               # list entries m6, m7, m8
   \(fit, nm) {
     by_var <- socio_by[[nm]]      # look up "Sex", "age_group", or "ssyk_WBHL_group"
     get_hr(fit, by_var) |>
@@ -197,6 +236,13 @@ tbl_int_sociodemographics <- imap_dfr(
 )
 
 
+# fit_inc <-
+# get_hr(m9, "IncomeLevel_CSFVI")
+#
+# tbl_int_sociodemographics <- bind_rows(
+#   tbl_int_sociodemographics,
+#   fit_inc |> mutate(exposure = "m9", .before = 1)
+# )
 ```
 
 
@@ -216,7 +262,7 @@ exposures <- c(
   bmi    = "BMI_cat",
   exer   = "Exercise_cat",
   health = "Health_cat",
-  tests  = "n_tests_within_5_fac_vs_ctrl"         
+  tests  = "n_tests_within_5_fac_vs_ctrl"
 )
 ## 0 ── fixed covariates ------------------------------------------------
 cov_base_vars <- c(
@@ -236,18 +282,23 @@ fits <- imap(
       )
     )
 
+
+    write_rds(fits,
+              here::here("..", "results", "models", "ten_yr_lifestyle_interaction_fits.rds")
+    )
+
     # keep *all* rows for the interaction model, but drop rows
     # missing the exposure itself (not the composite factor)
     clean_dat <- data_cvd |>
       drop_na(all_of(.x))  %>%      # exposure-specific NA removal
       group_by(id_cluster) %>%               # ensure ≥ 5 usable rows / cluster
-      filter(n() >= 5) %>% 
+      filter(n() >= 5) %>%
       ungroup()
 
     coxph(fml, data = clean_dat)
   }
 )
-    
+
 
 ## iterate over every model in `fits` ----------------------------------
 hr_tbl_all <- imap_dfr(
@@ -260,7 +311,7 @@ hr_tbl_all <- imap_dfr(
 )
 
 hr_tbl_all_df <-
-hr_tbl_all |> as_tibble() |> 
+hr_tbl_all |> as_tibble() |>
   mutate(
     groups = coalesce(
       vo2_cat, BMI_cat, Exercise_cat, Health_cat, n_tests_within_5_fac_vs_ctrl),
@@ -270,8 +321,8 @@ hr_tbl_all |> as_tibble() |>
                       exer   = "Exercise",
                       health = "Health",
                       tests  = "Tests")
-  ) |> 
-  select(exposure, groups, n_Control,  n_HPA, events_Control, events_HPA, term,    contrast,      estimate,  conf.low, conf.high, p.value     ) |> 
+  ) |>
+  select(exposure, groups, n_Control,  n_HPA, events_Control, events_HPA, term,    contrast,      estimate,  conf.low, conf.high, p.value     ) |>
   print(n = 200)
 
 
@@ -280,6 +331,12 @@ write_csv(
   hr_tbl_all_df,
   here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
 )
+
+# hr_tbl_all_df <-
+# read_csv(
+#
+#   here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
+# )
 ```
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -294,25 +351,25 @@ hr_tbl_all  |> as_tibble()
 
 
 # 1. MAIN MODELS (M1–M5)  -------------
-tbl_main2 <- tbl_main |> 
+tbl_main2 <- tbl_main |>
   rename(exposure = model) |>          # rename “model” → “exposure”
   mutate(groups = exposure) |>            # one overall stratum
   select(
-    exposure, groups, 
+    exposure, groups,
     n_Control, events_Control,
     n_HPA,     events_HPA,
-    term, 
+    term,
     estimate, conf.low, conf.high, p.value
   )
 
 # 2. SOCIODEMOGRAPHIC INTERACTIONS (M6–M8) ----------------------------
-tbl_int2 <- tbl_int_sociodemographics |> 
+tbl_int2 <- tbl_int_sociodemographics |>
   rename(exposure = exposure) |>       # already “m6” etc
   mutate(
     groups = coalesce(                # pick whichever stratum is non-NA
-      Sex, age_group, ssyk_WBHL_group
+      Sex, age_group, SSYK, EducationLevel, IncomeLevel_CSFVI, ssyk_WBHL_group
     )
-  ) |> 
+  ) |>
   select(
     exposure, groups,
     n_Control, events_Control,
@@ -349,6 +406,9 @@ final2 <- final_hr_tbl %>%
       exposure == "m6" ~ paste0(groups),
       exposure == "m7" ~ paste0(groups, " yrs"),
       exposure == "m8" ~ paste0(groups),
+      exposure == "m9" ~ paste0(groups),
+      exposure == "m10" ~ paste0(groups),
+      exposure == "m11" ~ paste0(groups),
       exposure == "VO2" ~ paste0("VO2max: ", groups),
       exposure == "BMI" ~ paste0("BMI: ", groups),
       exposure == "Exercise" ~ paste0("Exercise: ", groups),
@@ -384,17 +444,17 @@ write_csv(
 ```{r}
 
 # coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated, data = data_cvd |>   mutate(
-#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |> 
+#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |>
 #       filter(n_tests_within_5_fac_vs_ctrl == "HPA, 1 test")
 #   ) |> tidy(exponentiate = TRUE)
-# 
+#
 # coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated, data = data_cvd |>   mutate(
-#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |> 
+#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |>
 #       filter(n_tests_within_5_fac_vs_ctrl == "HPA, 2 tests")
 #   ) |> tidy(exponentiate = TRUE)
-# 
+#
 # coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated, data = data_cvd |>   mutate(
-#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |> 
+#     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)) |>
 #       filter(n_tests_within_5_fac_vs_ctrl == "HPA, ≥3 tests")
 #   ) |> tidy(exponentiate = TRUE)
 
@@ -402,10 +462,10 @@ write_csv(
 co_fit <-
 coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ n_tests_within_5_fac_vs_ctrl*treated +
         BMI_cat + Sex +
-    Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag + 
+    Age + birth_cohort + comorbidity + cvd_art_before_HPA_flag +
     IncomeLevel_CSFVI, data = data_cvd |>   mutate(
     n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)
-  )) 
+  ))
 
 # relative effect (hazard ratio)
 # average hazard ratios (treated vs control) within each test stratum
@@ -429,9 +489,9 @@ hr_tbl
 #  averaged over their observed distributions of bmi, sex, age, etc.
 
 pre_tbl <- avg_predictions(
-  co_fit, 
-  variables = "treated", 
-  by = "n_tests_within_5_fac_vs_ctrl", 
+  co_fit,
+  variables = "treated",
+  by = "n_tests_within_5_fac_vs_ctrl",
   type = "risk")
 pre_tbl
 
@@ -440,15 +500,12 @@ pre_tbl
 # “moving a person from control to hpa status, while keeping the test stratum fixed at ≥3, reduces the 10-year risk by 0.27 (95 % ci 0.22–0.31).”
 #  while holding their own bmi, sex, age, etc. fixed and keeping them in the same test stratum
 abs_tbl <- avg_comparisons(
-  co_fit, 
-  variables = "treated", 
-  by = "n_tests_within_5_fac_vs_ctrl", 
+  co_fit,
+  variables = "treated",
+  by = "n_tests_within_5_fac_vs_ctrl",
   type = "risk")
 abs_tbl
 
 
 
 ```
-
-
-
