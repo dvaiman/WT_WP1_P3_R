@@ -153,8 +153,8 @@ df_lifestyle_n_hpa <-
         StressOverall,
         Astrand_rel_VO2,
         BMI
-      ) |>
-      by = join_by(LopNr, HPA_first_test_date == Performed)
+      ),
+    by = join_by(LopNr, first_test_date == Performed)
   ) |>
   # get lifestyle variables for second test
   left_join(
@@ -171,7 +171,7 @@ df_lifestyle_n_hpa <-
         BMI
       ) |>
       rename_with(~ paste0(., "_second"), .cols = -c(LopNr, Performed)),
-    by = join_by(LopNr, HPA_second_test_date == Performed)
+    by = join_by(LopNr, second_test_date == Performed)
   ) |>
   # get lifestyle variables for last test within 5 years
   left_join(
@@ -188,7 +188,7 @@ df_lifestyle_n_hpa <-
         BMI
       ) |>
       rename_with(~ paste0(., "_last"), .cols = -c(LopNr, Performed)),
-    by = join_by(LopNr, HPA_last_test_date == Performed)
+    by = join_by(LopNr, last_test_date == Performed)
   )
 
 
