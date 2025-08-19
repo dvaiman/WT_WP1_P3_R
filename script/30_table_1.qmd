@@ -1,6 +1,9 @@
 ---
-title: "Untitled"
-format: html
+title: "Table 1: Descriptive statistics"
+execute:
+  warning: false
+  echo: true
+  eval: true
 ---
 
 
@@ -177,5 +180,13 @@ tbl_merge_ex1 <-
   )
 
 
+tbl_merge_ex1
+```
+
+
+```{r}
+#| eval: false
+
 gtsave(tbl_merge_ex1, here::here("..", "results", "tables", "table_1.docx"))
 ```
+
