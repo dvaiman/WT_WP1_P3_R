@@ -76,55 +76,55 @@ hpa_risk_time <-
 ```
 
 ```{r}
-# countin how many tests each LopNr has
+# counting how many tests each LopNr has
 df_time_test_count <-
-  hpa_risk_time |>
-  left_join(hpa |> select(!Performed), by = join_by(LopNr)) |>
+  df1 <-
+    hpa |>
+    select(
+      LopNr,
+      Performed
+    ) |>
+    left_join(
+      hpa_risk_time |>
+        distinct(LopNr, .keep_all = TRUE) |>
+        select(!Performed, LopNr),
+      by = join_by(LopNr)
+    ) |>
+
+    group_by(LopNr) |>
+    arrange(Performed) |>
+    mutate(
+      first_test_date = min(Performed, na.rm = TRUE),
+      within_5 = if_else(Performed <= first_test_date + days(1826), 1, 0)
+    ) |>
+    # filter to only tests within 5 years from first test
+    filter(within_5 == 1) |>
+    ungroup()
+
+
+df2 <- df1 |>
+  select(LopNr, Performed) |>
+  arrange(LopNr, Performed) |>
   group_by(LopNr) |>
-  arrange(Performed) |>
   mutate(
+    n_tests_within_5 = n(),
+    test_number = row_number()
+  ) |>
+  summarise(
+    n_tests_within_5 = first(n_tests_within_5),
     first_test_date = min(Performed, na.rm = TRUE),
-    within_5 = if_else(Performed <= first_test_date + days(1826), 1, 0),
-    within_10 = if_else(Performed <= first_test_date + days(3653), 1, 0),
+    second_test_date = if_else(n() >= 2, nth(Performed, 2), NA_Date_),
+    last_test_date = max(Performed, na.rm = TRUE),
+    .groups = "drop"
   ) |>
   mutate(
-    n_tests_total = n(),
-    n_tests_within_5 = sum(within_5, na.rm = TRUE),
-    n_tests_within_10 = sum(within_10, na.rm = TRUE),
-    # compute the mean interval using lag for tests in days
-    #    mean_time_between_tests = if_else(n_tests_total > 1,
-    #                                mean(as.numeric(Performed - lag(Performed)), na.rm = TRUE),
-    #                               0),
-    # composite score: here defined as tests within 5 years divided by risk_time_art (if risk_time_art > 0)
-    composite_score_within_5 = if_else(
-      risk_time_art > 0,
-      n_tests_within_5 / risk_time_art,
+    days_first_to_second = if_else(
+      !is.na(second_test_date),
+      as.numeric(second_test_date - first_test_date),
       NA_real_
     ),
-    # composite score: here defined as tests within 10 years divided by risk_time_art (if risk_time_art > 0)
-    composite_score_within_10 = if_else(
-      risk_time_art > 0,
-      n_tests_within_10 / risk_time_art,
-      NA_real_
-    ),
-    composite_score_total = if_else(
-      risk_time_art > 0,
-      n_tests_total / risk_time_art,
-      NA_real_
-    )
-  ) |>
-  ungroup() |>
-  select(
-    LopNr,
-    within_5,
-    n_tests_total,
-    n_tests_within_5,
-    n_tests_within_10,
-    composite_score_within_5,
-    composite_score_within_10,
-    composite_score_total
-  ) |>
-  distinct(LopNr, .keep_all = TRUE)
+    days_first_to_last = as.numeric(last_test_date - first_test_date)
+  )
 
 
 ```
@@ -132,11 +132,18 @@ df_time_test_count <-
 # life-style variables
 ## and join with number of HPAs
 ```{r}
-
+# lifestyle variables for first, second, and last test within 5 years
 df_lifestyle_n_hpa <-
   hpa_risk_time |>
+  distinct(LopNr, .keep_all = TRUE) |> # get one row per LopNr from hpa_risk_time
+  left_join(
+    df2,
+    by = join_by(LopNr)
+  ) |>
+  # get lifestyle variables for first test
   left_join(
     hpa |>
+      filter(!is.na(Performed)) |>
       select(
         LopNr,
         Performed,
@@ -146,14 +153,43 @@ df_lifestyle_n_hpa <-
         StressOverall,
         Astrand_rel_VO2,
         BMI
-      ),
-    by = join_by(LopNr, Performed)
+      ) |>
+      by = join_by(LopNr, HPA_first_test_date == Performed)
   ) |>
+  # get lifestyle variables for second test
   left_join(
-    df_time_test_count,
-    by = join_by(LopNr)
+    hpa |>
+      filter(!is.na(Performed)) |>
+      select(
+        LopNr,
+        Performed,
+        ExerciseAnswer,
+        TobaccoSmoking,
+        Health,
+        StressOverall,
+        Astrand_rel_VO2,
+        BMI
+      ) |>
+      rename_with(~ paste0(., "_second"), .cols = -c(LopNr, Performed)),
+    by = join_by(LopNr, HPA_second_test_date == Performed)
   ) |>
-  distinct(LopNr, .keep_all = TRUE)
+  # get lifestyle variables for last test within 5 years
+  left_join(
+    hpa |>
+      filter(!is.na(Performed)) |>
+      select(
+        LopNr,
+        Performed,
+        ExerciseAnswer,
+        TobaccoSmoking,
+        Health,
+        StressOverall,
+        Astrand_rel_VO2,
+        BMI
+      ) |>
+      rename_with(~ paste0(., "_last"), .cols = -c(LopNr, Performed)),
+    by = join_by(LopNr, HPA_last_test_date == Performed)
+  )
 
 
 ```
