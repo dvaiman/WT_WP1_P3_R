@@ -17,18 +17,30 @@ data_cvd <- read_csv(here::here(
     read_csv(here::here("..", "data", "df_n_tests_CVD_2025-03-05.csv")) |>
       select(
         LopNr,
-        n_tests_total,
         n_tests_within_5,
-        n_tests_within_10,
-        composite_score_within_5,
-        composite_score_within_10,
-        composite_score_total,
+        first_test_date,
+        second_test_date,
+        last_test_date,
+        days_first_to_second,
+        days_first_to_last,
         ExerciseAnswer,
         TobaccoSmoking,
         Health,
         StressOverall,
         Astrand_rel_VO2,
-        BMI
+        BMI,
+        ExerciseAnswer_second,
+        TobaccoSmoking_second,
+        Health_second,
+        StressOverall_second,
+        Astrand_rel_VO2_second,
+        BMI_second,
+        ExerciseAnswer_last,
+        TobaccoSmoking_last,
+        Health_last,
+        StressOverall_last,
+        Astrand_rel_VO2_last,
+        BMI_last
       )
   )
 
@@ -98,17 +110,7 @@ data_cvd <-
       n_tests_within_5_fac,
       levels = c("Control", "HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests")
     ),
-    n_tests_within_10_fac = case_when(
-      is.na(n_tests_within_10) ~ "Control",
-      n_tests_within_10 == 0 ~ "Control",
-      n_tests_within_10 == 1 ~ "HPA, 1 test",
-      n_tests_within_10 == 2 ~ "HPA, 2 tests",
-      n_tests_within_10 > 2 ~ "HPA, ≥3 tests"
-    ),
-    n_tests_within_10_fac = factor(
-      n_tests_within_10_fac,
-      levels = c("Control", "HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests")
-    ),
+
     Sex = if_else(Sex == 1, "Men", "Women"),
     Sex = factor(Sex, c("Men", "Women")),
     comorbidity = case_when(
@@ -120,10 +122,7 @@ data_cvd <-
 
     across(
       c(
-        n_tests_total,
         n_tests_within_5,
-        composite_score_within_5,
-        composite_score_total
       ),
       ~ if_else(is.na(.), 0, .)
     ),
@@ -230,7 +229,7 @@ data_cvd <-
       cvd_art_before_HPA_flag
     ),
     # life-style variables
-    BMI_cat_tmp = case_when(
+    BMI_cat = case_when(
       BMI < 18.5 ~ "Underweight",
       BMI >= 18.5 & BMI < 25 ~ "Normal weight",
       BMI >= 25 & BMI < 30 ~ "Overweight",
@@ -239,7 +238,7 @@ data_cvd <-
     ),
 
     ## repeat for the other exposures
-    vo2_cat_tmp = case_when(
+    vo2_cat = case_when(
       Astrand_rel_VO2 < 20 ~ "Very low",
       Astrand_rel_VO2 >= 20 & Astrand_rel_VO2 < 30 ~ "Low",
       Astrand_rel_VO2 >= 30 & Astrand_rel_VO2 < 40 ~ "Moderate",
@@ -247,13 +246,13 @@ data_cvd <-
       Astrand_rel_VO2 >= 50 ~ "Very high",
       TRUE ~ NA_character_
     ),
-    Health_cat_tmp = case_when(
+    Health_cat = case_when(
       Health %in% 1:2 ~ "Low",
       Health == 3 ~ "Moderate",
       Health %in% 4:5 ~ "Good",
       TRUE ~ NA_character_
     ),
-    Exercise_cat_tmp = case_when(
+    Exercise_cat = case_when(
       ExerciseAnswer %in% 1:2 ~ "Low",
       ExerciseAnswer == 3 ~ "Moderate",
       ExerciseAnswer %in% 4:5 ~ "Good",
@@ -266,26 +265,86 @@ data_cvd <-
       n_tests_within_5 == 2 ~ "HPA, 2 tests",
       n_tests_within_5 > 2 ~ "HPA, ≥3 tests"
     ),
-    n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)
+    n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl),
+    BMI_cat_second = case_when(
+      BMI_second < 18.5 ~ "Underweight",
+      BMI_second >= 18.5 & BMI_second < 25 ~ "Normal weight",
+      BMI_second >= 25 & BMI_second < 30 ~ "Overweight",
+      BMI_second >= 30 ~ "Obesity",
+      TRUE ~ NA_character_
+    ),
+    BMI_cat_last = case_when(
+      BMI_last < 18.5 ~ "Underweight",
+      BMI_last >= 18.5 & BMI_last < 25 ~ "Normal weight",
+      BMI_last >= 25 & BMI_last < 30 ~ "Overweight",
+      BMI_last >= 30 ~ "Obesity",
+      TRUE ~ NA_character_
+    ),
+
+    # VO2 categories for second and last tests
+    vo2_cat_second = case_when(
+      Astrand_rel_VO2_second < 20 ~ "Very low",
+      Astrand_rel_VO2_second >= 20 & Astrand_rel_VO2_second < 30 ~ "Low",
+      Astrand_rel_VO2_second >= 30 & Astrand_rel_VO2_second < 40 ~ "Moderate",
+      Astrand_rel_VO2_second >= 40 & Astrand_rel_VO2_second < 50 ~ "High",
+      Astrand_rel_VO2_second >= 50 ~ "Very high",
+      TRUE ~ NA_character_
+    ),
+    vo2_cat_last = case_when(
+      Astrand_rel_VO2_last < 20 ~ "Very low",
+      Astrand_rel_VO2_last >= 20 & Astrand_rel_VO2_last < 30 ~ "Low",
+      Astrand_rel_VO2_last >= 30 & Astrand_rel_VO2_last < 40 ~ "Moderate",
+      Astrand_rel_VO2_last >= 40 & Astrand_rel_VO2_last < 50 ~ "High",
+      Astrand_rel_VO2_last >= 50 ~ "Very high",
+      TRUE ~ NA_character_
+    ),
+
+    # Health categories for second and last tests
+    Health_cat_second = case_when(
+      Health_second %in% 1:2 ~ "Low",
+      Health_second == 3 ~ "Moderate",
+      Health_second %in% 4:5 ~ "Good",
+      TRUE ~ NA_character_
+    ),
+    Health_cat_last = case_when(
+      Health_last %in% 1:2 ~ "Low",
+      Health_last == 3 ~ "Moderate",
+      Health_last %in% 4:5 ~ "Good",
+      TRUE ~ NA_character_
+    ),
+
+    # Exercise categories for second and last tests
+    Exercise_cat_second = case_when(
+      ExerciseAnswer_second %in% 1:2 ~ "Low",
+      ExerciseAnswer_second == 3 ~ "Moderate",
+      ExerciseAnswer_second %in% 4:5 ~ "Good",
+      TRUE ~ NA_character_
+    ),
+    Exercise_cat_last = case_when(
+      ExerciseAnswer_last %in% 1:2 ~ "Low",
+      ExerciseAnswer_last == 3 ~ "Moderate",
+      ExerciseAnswer_last %in% 4:5 ~ "Good",
+      TRUE ~ NA_character_
+    )
   ) %>%
 
   ## copy the treated subject’s category to every row in its cluster, treated with NA becomes NA in theire controls
-  group_by(id_cluster) %>%
+  group_by(id_cluster) |>
   mutate(
     BMI_cat = factor(
-      replace_na(BMI_cat_tmp, first(na.omit(BMI_cat_tmp))),
+      replace_na(BMI_cat, first(na.omit(BMI_cat))),
       levels = c("Underweight", "Normal weight", "Overweight", "Obesity")
     ),
     vo2_cat = factor(
-      replace_na(vo2_cat_tmp, first(na.omit(vo2_cat_tmp))),
+      replace_na(vo2_cat, first(na.omit(vo2_cat))),
       levels = c("Very low", "Low", "Moderate", "High", "Very high")
     ),
     Health_cat = factor(
-      replace_na(Health_cat_tmp, first(na.omit(Health_cat_tmp))),
+      replace_na(Health_cat, first(na.omit(Health_cat))),
       levels = c("Low", "Moderate", "Good")
     ),
     Exercise_cat = factor(
-      replace_na(Exercise_cat_tmp, first(na.omit(Exercise_cat_tmp))),
+      replace_na(Exercise_cat, first(na.omit(Exercise_cat))),
       levels = c("Low", "Moderate", "Good")
     ),
     n_tests_within_5_fac_vs_ctrl = factor(
@@ -294,8 +353,44 @@ data_cvd <-
         first(na.omit(n_tests_within_5_fac_vs_ctrl))
       ),
       levels = c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests")
+    ),
+
+    # Second test variables - apply cluster-based imputation
+    BMI_cat_second = factor(
+      replace_na(BMI_cat_second, first(na.omit(BMI_cat_second))),
+      levels = c("Underweight", "Normal weight", "Overweight", "Obesity")
+    ),
+    vo2_cat_second = factor(
+      replace_na(vo2_cat_second, first(na.omit(vo2_cat_second))),
+      levels = c("Very low", "Low", "Moderate", "High", "Very high")
+    ),
+    Health_cat_second = factor(
+      replace_na(Health_cat_second, first(na.omit(Health_cat_second))),
+      levels = c("Low", "Moderate", "Good")
+    ),
+    Exercise_cat_second = factor(
+      replace_na(Exercise_cat_second, first(na.omit(Exercise_cat_second))),
+      levels = c("Low", "Moderate", "Good")
+    ),
+
+    # Last test variables - apply cluster-based imputation
+    BMI_cat_last = factor(
+      replace_na(BMI_cat_last, first(na.omit(BMI_cat_last))),
+      levels = c("Underweight", "Normal weight", "Overweight", "Obesity")
+    ),
+    vo2_cat_last = factor(
+      replace_na(vo2_cat_last, first(na.omit(vo2_cat_last))),
+      levels = c("Very low", "Low", "Moderate", "High", "Very high")
+    ),
+    Health_cat_last = factor(
+      replace_na(Health_cat_last, first(na.omit(Health_cat_last))),
+      levels = c("Low", "Moderate", "Good")
+    ),
+    Exercise_cat_last = factor(
+      replace_na(Exercise_cat_last, first(na.omit(Exercise_cat_last))),
+      levels = c("Low", "Moderate", "Good")
     )
-  ) %>%
+  ) |>
   ungroup()
 
 # create dataset wit matched controls for those who have NA in kommunsize and place of origin are removed
