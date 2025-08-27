@@ -1,0 +1,515 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+
+
+
+```{r}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(broom)
+library(marginaleffects)
+```
+
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+
+source(here::here("script", "03_data_source_file_change.R"))
+
+glimpse(data_cvd)
+glimpse(df_change)
+
+```
+
+
+# Test
+
+```{r}
+df_final_analysis |> count(Exercise_change_first_to_second, treated)
+df_final_analysis |> count(BMI_change_first_to_second, treated)
+df_final_analysis |> count(Health_change_first_to_second, treated)
+df_final_analysis |> count(VO2_change_first_to_second, treated)
+df_final_analysis |> count(age_baseline_test1, treated) # check this
+df_final_analysis |> count(cvd_art_before_HPA_flag, treated)
+df_final_analysis |> count(birth_cohort, treated)
+df_final_analysis |> count(EducationLevel, treated)
+df_final_analysis |>
+  count(risk_time_art_10yrs, treated) |>
+  filter(treated == "Control") # check this
+df_final_analysis |>
+  count(days_first_to_second, treated) |>
+  filter(treated == "Control") # check this
+df_change |> count(first_test_date, treated) |> filter(treated == "Control")
+
+df_final_analysis |>
+  group_by(treated) |>
+  summarise(
+    BMI_change_first_to_second = mean(
+      BMI_change_first_to_second == "Increase",
+      na.rm = TRUE
+    ),
+    Health_change_first_to_second = mean(
+      Health_change_first_to_second == "Increase"
+    ),
+    Exercise_change_first_to_second = mean(
+      Exercise_change_first_to_second == "Increase"
+    ),
+    VO2_change_first_to_second = mean(
+      VO2_change_first_to_second == "Increase"
+    ),
+  )
+
+df_final_analysis |>
+  group_by(BMI_change_first_to_second, treated) |>
+  summarise(
+    mean(risk_art_flag_10yrs)
+  )
+
+model <- coxph(
+  Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ BMI_cat * treated,
+  data = data_cvd
+)
+
+model <- coxph(
+  Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+    Exercise_change_first_to_second *
+      treated +
+      cvd_event_between_tests +
+      cvd_art_before_HPA_flag +
+      birth_cohort +
+      comorbidity +
+      EducationLevel +
+      age_baseline_test1 +
+      assigned_days_first_to_second +
+      Sex,
+  data = df_final_analysis
+)
+
+model2 <- coxph(
+  Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+    BMI_change_first_to_second *
+      treated +
+      BMI_cat +
+      Age +
+      comorbidity +
+      assigned_days_first_to_second +
+      birth_cohort,
+  data = df_final_analysis |>
+    drop_na(BMI_change_first_to_second) |>
+    group_by(id_cluster) |>
+    filter(
+      n() == 5,
+      sum(treated == "HPA") == 1,
+      sum(treated == "Control") == 4
+    ) |>
+    ungroup()
+)
+
+
+model2 |>
+  avg_comparisons(
+    variables = "treated",
+    by = "BMI_change_first_to_second",
+    type = "lp",
+    transform = "exp"
+  )
+
+avg_comparisons(
+  model,
+  variables = "BMI_cat",
+  by = "treated",
+  type = "lp",
+  transform = "exp"
+)
+
+
+# Function to run Cox models for each change variable (main analysis)
+run_main_analysis <- function(change_var, data = df_final_analysis) {
+  # Create formula
+  formula_str <- paste0(
+    "Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ ",
+    change_var,
+    " + ",
+    "cvd_event_between_tests + ",
+    "age_baseline_test1 + ",
+    "Sex + ",
+    "cvd_art_before_HPA_flag + ",
+    "EducationLevel + ",
+    "income_pct_diff_from_median + ",
+    "comorbidity + ",
+    "year_test1 + ",
+    "birth_cohort + ",
+    "assigned_days_first_to_second"
+  )
+
+  # Fit model
+  model <- coxph(
+    as.formula(formula_str),
+    data = data |> drop_na(all_of(change_var))
+  )
+
+  return(model)
+}
+
+# Run models for each change variable
+model_exercise_main <- run_main_analysis("Exercise_change_first_to_second")
+model_health_main <- run_main_analysis("Health_change_first_to_second")
+model_bmi_main <- run_main_analysis("BMI_change_first_to_second")
+model_vo2_main <- run_main_analysis("VO2_change_first_to_second")
+
+# Extract results
+results_main <- bind_rows(
+  broom::tidy(model_exercise_main, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(str_detect(term, "Exercise_change")) |>
+    mutate(change_variable = "Exercise"),
+  broom::tidy(model_health_main, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(str_detect(term, "Health_change")) |>
+    mutate(change_variable = "Health"),
+  broom::tidy(model_bmi_main, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(str_detect(term, "BMI_change")) |>
+    mutate(change_variable = "BMI"),
+  broom::tidy(model_vo2_main, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(str_detect(term, "VO2_change")) |>
+    mutate(change_variable = "VO2")
+)
+
+print(results_main)
+```
+
+
+# Main Analysis: 10-year follow-up from first test
+```{r}
+# Define the change variables to analyze
+change_vars <- c(
+  "BMI_change_first_to_second",
+  "VO2_change_first_to_second",
+  "Exercise_change_first_to_second",
+  "Health_change_first_to_second"
+)
+
+# Function to run Cox model for a specific change variable
+run_change_analysis <- function(change_var, data = df_final_analysis) {
+  cat("Analyzing:", change_var, "\n")
+
+  # Create the data for this specific model
+  model_data <- data |>
+    drop_na(all_of(change_var)) |>
+    group_by(id_cluster) |>
+    filter(
+      n() == 5,
+      sum(treated == "HPA") == 1,
+      sum(treated == "Control") == 4
+    ) |>
+    ungroup()
+
+  cat("Sample size:", nrow(model_data), "observations\n")
+  cat("Number of clusters:", length(unique(model_data$id_cluster)), "\n")
+
+  # Build the formula dynamically
+  formula_str <- paste(
+    "Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~",
+    change_var,
+    "* treated +",
+    "Age + comorbidity + assigned_days_first_to_second + birth_cohort"
+  )
+
+  # Add baseline adjustment based on change variable
+  if (change_var == "BMI_change_first_to_second") {
+    formula_str <- paste(formula_str, "+ BMI_cat")
+  } else if (change_var == "VO2_change_first_to_second") {
+    formula_str <- paste(formula_str, "+ vo2_cat")
+  } else if (change_var == "Exercise_change_first_to_second") {
+    formula_str <- paste(formula_str, "+ Exercise_cat")
+  } else if (change_var == "Health_change_first_to_second") {
+    formula_str <- paste(formula_str, "+ Health_cat")
+  }
+
+  cat("Formula:", formula_str, "\n")
+
+  # Run the Cox model with error handling
+  tryCatch(
+    {
+      model <- coxph(
+        as.formula(formula_str),
+        data = model_data
+      )
+
+      # Check convergence
+      convergence_ok <- TRUE
+      convergence_msg <- "OK"
+
+      if (!is.null(model$info)) {
+        if ("convergence" %in% names(model$info)) {
+          if (model$info$convergence != 0) {
+            convergence_ok <- FALSE
+            convergence_msg <- paste("Failed with code", model$info$convergence)
+          }
+        }
+      }
+
+      # Also check for other convergence indicators
+      if (any(is.na(model$coefficients))) {
+        convergence_ok <- FALSE
+        convergence_msg <- "NA coefficients detected"
+      }
+
+      cat("Convergence:", convergence_msg, "\n\n")
+
+      # Return results
+      return(list(
+        model = model,
+        data = model_data,
+        change_var = change_var,
+        n_obs = nrow(model_data),
+        n_clusters = length(unique(model_data$id_cluster)),
+        convergence_ok = convergence_ok,
+        convergence_msg = convergence_msg
+      ))
+    },
+    error = function(e) {
+      cat("ERROR in model fitting:", conditionMessage(e), "\n\n")
+      return(list(
+        model = NULL,
+        data = model_data,
+        change_var = change_var,
+        n_obs = nrow(model_data),
+        n_clusters = length(unique(model_data$id_cluster)),
+        convergence_ok = FALSE,
+        convergence_msg = paste("Model fitting failed:", conditionMessage(e)),
+        error = e
+      ))
+    }
+  )
+}
+
+# Function to compute marginal effects for a model result
+compute_marginal_effects <- function(model_result) {
+  cat("Computing marginal effects for:", model_result$change_var, "\n")
+
+  # Check if model exists and converged
+  if (is.null(model_result$model)) {
+    cat("Skipping - no valid model\n")
+    return(NULL)
+  }
+
+  if (!model_result$convergence_ok) {
+    cat("Skipping - model did not converge properly\n")
+    return(NULL)
+  }
+
+  # Calculate marginal effects with error handling
+  tryCatch(
+    {
+      margins <- model_result$model |>
+        avg_comparisons(
+          variables = "treated",
+          by = model_result$change_var,
+          type = "lp",
+          transform = "exp"
+        )
+
+      return(margins)
+    },
+    error = function(e) {
+      cat("ERROR in marginal effects:", conditionMessage(e), "\n")
+      return(NULL)
+    }
+  )
+}
+
+# Run analysis for all change variables
+cat("=== RUNNING COX MODELS FOR ALL CHANGE VARIABLES ===\n\n")
+
+model_results <- change_vars |>
+  map(~ run_change_analysis(.x, df_final_analysis)) |>
+  set_names(change_vars)
+
+cat("=== COMPUTING MARGINAL EFFECTS FOR ALL MODELS ===\n\n")
+
+marginal_results <- model_results |>
+  map(compute_marginal_effects) |>
+  set_names(change_vars)
+
+# Display results
+cat("=== RESULTS SUMMARY ===\n\n")
+
+for (var in change_vars) {
+  cat("### ", var, " ###\n")
+  cat("Sample size:", model_results[[var]]$n_obs, "\n")
+  cat("Clusters:", model_results[[var]]$n_clusters, "\n")
+  cat("Convergence:", model_results[[var]]$convergence_msg, "\n")
+
+  if (!is.null(marginal_results[[var]])) {
+    print(marginal_results[[var]])
+  } else {
+    cat("No marginal effects available\n")
+  }
+  cat("\n")
+}
+
+# Combine successful results only
+successful_results <- marginal_results[!sapply(marginal_results, is.null)]
+
+if (length(successful_results) > 0) {
+  combined_results <- successful_results |>
+    imap_dfr(
+      ~ {
+        .x |>
+          mutate(outcome_variable = .y) |>
+          select(outcome_variable, everything())
+      }
+    )
+
+  cat("=== COMBINED SUCCESSFUL RESULTS ===\n")
+  print(combined_results)
+
+  # Optional: Save results
+  # write.csv(combined_results, "change_variable_marginal_effects.csv", row.names = FALSE)
+} else {
+  cat("No successful analyses to combine\n")
+}
+
+# Summary of model performance
+cat("=== MODEL PERFORMANCE SUMMARY ===\n")
+performance_summary <- model_results |>
+  map_dfr(
+    ~ {
+      data.frame(
+        variable = .x$change_var,
+        n_obs = .x$n_obs,
+        n_clusters = .x$n_clusters,
+        convergence = .x$convergence_ok,
+        message = .x$convergence_msg
+      )
+    }
+  )
+
+performance_summary
+```
+
+# plot
+
+```{r}
+library(scales)
+
+# Prepare data for plotting
+plot_data <- combined_results |>
+  # Clean up variable names for better display
+  mutate(
+    # Extract the change category column name (it varies by outcome)
+    change_category = case_when(
+      outcome_variable == "BMI_change_first_to_second" ~
+        BMI_change_first_to_second,
+      outcome_variable == "VO2_change_first_to_second" ~
+        VO2_change_first_to_second,
+      outcome_variable == "Exercise_change_first_to_second" ~
+        Exercise_change_first_to_second,
+      outcome_variable == "Health_change_first_to_second" ~
+        Health_change_first_to_second
+    ),
+    # Clean outcome variable names
+    outcome_clean = case_when(
+      outcome_variable == "BMI_change_first_to_second" ~ "BMI Change",
+      outcome_variable == "VO2_change_first_to_second" ~ "VO2 Change",
+      outcome_variable == "Exercise_change_first_to_second" ~ "Exercise Change",
+      outcome_variable == "Health_change_first_to_second" ~
+        "Perceived Health Change"
+    ),
+    # Ensure change categories are factors with proper order
+    change_category = factor(
+      change_category,
+      levels = c("Decrease", "No change", "Increase")
+    ),
+    # Create significance indicator
+    significant = ifelse(p.value < 0.05, "Significant", "Not significant"),
+    # Create effect size categories
+    effect_size = case_when(
+      estimate < 0.90 ~ "Strong protective",
+      estimate < 0.95 ~ "Moderate protective",
+      estimate > 1.10 ~ "Strong harmful",
+      estimate > 1.05 ~ "Moderate harmful",
+      TRUE ~ "No effect"
+    )
+  ) |>
+  # Remove any missing change categories
+  filter(!is.na(change_category))
+
+# Create the main forest plot
+forest_plot <- plot_data |>
+  ggplot(aes(x = change_category, y = estimate, color = outcome_clean)) +
+
+  # Add horizontal reference line at HR = 1
+  geom_hline(
+    yintercept = 1,
+    linetype = "dashed",
+    color = "black",
+    alpha = 0.5
+  ) +
+
+  # Add confidence intervals
+  geom_errorbar(
+    aes(ymin = conf.low, ymax = conf.high),
+    width = 0.3,
+    size = 1,
+    position = position_dodge(width = 0.6)
+  ) +
+
+  # Add point estimates
+  geom_point(
+    size = 4,
+    position = position_dodge(width = 0.6)
+  ) +
+
+  # Facet by outcome type for clarity
+  facet_wrap(~outcome_clean, scales = "free_x", ncol = 2) +
+
+  # Customize scales
+  scale_y_continuous(
+    name = "Hazard Ratio (95% CI)\nHPA vs Control",
+    trans = "log",
+    breaks = c(0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3),
+    labels = number_format(accuracy = 0.1),
+    limits = c(0.5, 1.3)
+  ) +
+
+  scale_x_discrete(name = "") +
+
+  # Beautiful color palette
+  scale_color_manual(
+    name = "Outcome",
+    values = c(
+      "BMI Change" = "#E31A1C",
+      "VO2 Change" = "#1F78B4",
+      "Exercise Change" = "#33A02C",
+      "Perceived Health Change" = "#FF7F00"
+    )
+  ) +
+
+  # Theme customization
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    strip.text = element_text(face = "bold", size = 11),
+    legend.position = "none", # Remove legend since we have facets
+    axis.title.y = element_text(face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey30"),
+    plot.caption = element_text(size = 10, color = "grey50")
+  ) +
+
+  labs(
+    title = "",
+    subtitle = "Hazard ratios comparing HPA participants vs matched controls",
+    caption = "Values < 1 indicate lower CVD risk for HPA group\nDashed line shows no effect (HR = 1)"
+  )
+
+# Print the forest plot
+print(forest_plot)
+```
