@@ -1,30 +1,28 @@
 ---
-title: ""
-format:
-  html:
-    embed-resources: true
-    page-layout: full
-    grid:
-      margin-width: 100px
-author: Daniel Väisänen
-editor: source
-toc: true
+title: "HR time plot"
 execute:
   warning: false
   echo: true
-  eval: false
+  eval: true
 ---
+
 
 # Description
 
 HR plots over follow-up period.
 
 ```{r}
+#| eval: true
+
 library(tidyverse)
+library(DT)
 ```
 
 
 ```{r}
+#| eval: true
+
+
 hr_models <-
   read_rds(
     here::here(
@@ -36,15 +34,12 @@ hr_models <-
   )
 
 
-s_hr_hpa |> attributes()
 
-hr_models$Sex1 |> attributes()
-
-hr_models$`HPA count` |> attributes()
 ```
 
 ```{r}
-
+#| eval: true
+#|
 hr_models$Age1 <- NULL
 hr_models$Age2 <- NULL
 hr_models$Age3 <- NULL
@@ -52,11 +47,11 @@ hr_models$Age4 <- NULL
 hr_models$Age5 <- NULL
 hr_models$`HPA count` <- NULL
 
-hr_models$AgeGroup1 |> attr("standpred_contrast") |> print(n = 100)
+#hr_models$AgeGroup1 |> attr("standpred_contrast") |> print(n = 100)
 
-hr_models$HPA_3_tests |> attr("standpred_contrast") |> print(n = 100)
+#hr_models$HPA_3_tests |> attr("standpred_contrast") |> print(n = 100)
 
-hr_models$AgeGroup2 |> attr("standpred_contrast") |> print(n = 100)
+#hr_models$AgeGroup2 |> attr("standpred_contrast") |> print(n = 100)
 
 
 hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
@@ -167,12 +162,22 @@ hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
   # select(Model, Subgroup, Time, ΔRMST)
 })
 
-hr_table |> print(n = Inf)
+hr_table  |>
+  datatable(
+    options = list(
+      pageLength = 10,
+      scrollX = TRUE,
+      columnDefs = list(
+        list(className = 'dt-center', targets = 3:4)
+      )
+    ),
+    caption = ""
+  )
 ```
 
 
 ```{r}
-
+#| eval: true
 # Load required packages
 library(showtext)
 library(sysfonts)
@@ -198,7 +203,18 @@ labels <- c("3 m", "6 m", "1 y", "2 y", "4 y", "10 y", "20 y")
 label_x <- 90 # 6 m (first requested label point)
 
 
-hr_table |> print(n = Inf)
+hr_table |> 
+  datatable(
+    options = list(
+      pageLength = 10,
+      scrollX = TRUE,
+      columnDefs = list(
+        list(className = 'dt-center', targets = 3:4)
+      )
+    ),
+    caption = ""
+  )
+
 ## 1. label positions: one row per subgroup, ranked by HR at 3 y -----
 label_df <- hr_table |>
   filter(Group != "Occupation") |>
@@ -288,6 +304,9 @@ hr_table |>
   )
 
 
+```
+
+```{r}
 ggsave(
   here::here("..", "results", "figures", "hazard_ratio_over_time_plot.pdf"),
   width = 210,
@@ -296,10 +315,11 @@ ggsave(
   dpi = 300
 )
 
-
 ```
 
 ```{r}
+#| eval: false
+#|
 library(patchwork)
 hazard +
   ratio +
@@ -314,7 +334,8 @@ hazard +
 ```
 
 ```{r}
-
+#| eval: false
+#|
 rmst_wide <- rmst_table %>%
   pivot_wider(
     names_from = Time,

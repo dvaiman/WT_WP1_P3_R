@@ -1,31 +1,21 @@
-----
-title: ""
-format:
-  html:
-    embed-resources: true
-    page-layout: full
-    grid:
-      margin-width: 100px
-author: Daniel Väisänen
-editor: source
-toc: true
-execute:
-  warning: false
-  echo: true
-  eval: false
+---
+title: "RMSTD difference plots"
+
 ---
 
 # Description
 
-RMST difference plots over three time points.#
+RMST difference plots over three time points. Different variations with the same data.
 
 ```{r}
+#| eval: true
 library(tidyverse)
 ```
 
 # Data RMSTD
 
 ```{r}
+#| eval: true
 rmst_models <- read_rds(
   here::here("..", "results", "predictions",
              "marginal_rmst_difference_unrestricted_time_points.RDS")
@@ -109,7 +99,7 @@ rmst_table <- imap_dfr(rmst_models, function(fit_obj, model_name) {
     select(Model, Subgroup, Time, ΔRMST, difference, difference_lci, difference_uci, years_gain_per_1000, years_gain_per_1000_lci, years_gain_per_1000_uci, months_gain_per_100py)
 }) |>  filter(Model != "HPA count")
 
-rmst_table |> print(n = Inf)
+rmst_table |> print(n = 20)
 
 # rmst_wide <- rmst_table %>%
 #   pivot_wider(
@@ -164,7 +154,7 @@ Subgroup = fct_rev(Subgroup),
 Time = fct_rev(Time)
     )
 
-rmst_plot_data |> print(n = Inf)
+
 rmst_plot_data |>
 ggplot(aes(x = years_gain_per_1000, y = Subgroup, color = Time)) +
   geom_point(aes(shape = Time), size = 3 ) +
@@ -181,25 +171,6 @@ ggplot(aes(x = years_gain_per_1000, y = Subgroup, color = Time)) +
     legend.position = "bottom",
     legend.title = element_blank()
   )
-
-
-rmst_plot_data |>
-ggplot(aes(x = difference, y = Subgroup, color = Time)) +
-  geom_point(aes(shape = Time), size = 3, position = position_dodge(width = 1) ) +
-  geom_errorbarh(aes(xmin = difference_lci, xmax = difference_uci, group = Time), height = 0.2, position = position_dodge(width = 1) ) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
-  scale_shape_manual(values = c(16, 17, 18)) +
-  labs(
-    x = "Days gained per average individual",
-    y = "Subgroup",
-    title = "RMST differences by subgroup"
-  ) +
-  theme_minimal() +
-  theme(
-    legend.position = "bottom",
-    legend.title = element_blank()
-  )
-
 
 
 rmst_plot_data %>%
@@ -295,7 +266,7 @@ rmst_line_data <- rmst_table %>%
            )) %>%
   arrange(Model, Subgroup, time_years)
 
-rmst_line_data |>  print(n = Inf)
+rmst_line_data |>  print(n = 20)
 
 
 ## ---- 1. original wrangling -----------------------------------------
@@ -484,7 +455,7 @@ data_clean <- rmst_plot_data |>
    Model = if_else(is.na(Model), "HPA Count", Model),
   )
 
-print(data_clean, n = Inf)
+print(data_clean, n = 20)
 
 # Check data before filtering
 print("Data summary before filtering:")

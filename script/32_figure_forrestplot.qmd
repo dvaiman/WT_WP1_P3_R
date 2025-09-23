@@ -1,18 +1,9 @@
 ---
-title: ""
-format:
-  html:
-    embed-resources: true
-    page-layout: full
-    grid:
-      margin-width: 100px
-author: Daniel Väisänen
-editor: source
-toc: true
+title: "Instantenous 10 year risk of CVD in HPA participants vs controls"
 execute:
   warning: false
   echo: true
-  eval: false
+  eval: true
 ---
 
 # Description
@@ -32,12 +23,8 @@ library(systemfonts)
 # Setup fonts
 ```{r}
 font_add_google("Source Sans 3", "sourcesans")
-font_add(
-  "dejavu-bold",
-  regular = systemfonts::match_font("DejaVu Sans", style = "Bold")$path
-)
-font_add_google("Roboto Flex", "roboto-flex")
-font_add("dejavu", regular = systemfonts::match_font("DejaVu Sans")$path)
+
+font_add_google("Roboto", "roboto")
 showtext_auto()
 ```
 
@@ -96,7 +83,7 @@ df_forrest_plot <- df_forrest_plot |>
     hpa = " "
   ) |>
   add_row(
-    label = "Exercise",
+    label = "Exercise frequency",
     block = "Lifestyle related",
     ctrl = " ",
     hpa = " "
@@ -111,6 +98,12 @@ df_forrest_plot <- df_forrest_plot |>
   # Clean up labels
   mutate(
     label = case_when(
+      label == "M1: birth cohort" ~ "M1: birth cohort",
+      label == "M2: + age, sex, comorbidity & CVD" ~ "M2: + age, sex, prior comorbidity, prior CVD",
+      label == "M3: + income" ~ "M3: + income", 
+      label == "M4: + occupation" ~ "M4: + occupation",
+      label == "M5: + municipality & origin" ~ "M5: + municipality of recidence, country of origin",
+      
       label == "HPA, 1 test" ~ "1 assessment",
       label == "HPA, 2 tests" ~ "2 assessments",
       label == "HPA, ≥3 tests" ~ "≥3 assessments",
@@ -126,12 +119,12 @@ df_forrest_plot <- df_forrest_plot |>
       label == "VO2max: Low" ~ "20–29",
       label == "VO2max: Very low" ~ "<20",
 
-      label == "Exercise: Good" ~ "3 or more times/week",
+      label == "Exercise: Good" ~ "3 ≥ times/week",
       label == "Exercise: Moderate" ~ "1-2 times/week",
       label == "Exercise: Low" ~ "Never/sometime",
 
       label == "Health: Good" ~ "Good or very good",
-      label == "Health: Moderate" ~ "Neither poor nor good",
+      label == "Health: Moderate" ~ "Neither good nor poor",
       label == "Health: Low" ~ "Poor or very poor",
 
       label == "Education" & exposure == "m11" ~ "Education professionals",
@@ -145,10 +138,10 @@ df_forrest_plot <- df_forrest_plot |>
       levels = c(
         # Main models
         "M1: birth cohort",
-        "M2: + age, sex, comorbidity & CVD",
+        "M2: + age, sex, prior comorbidity, prior CVD",
         "M3: + income",
         "M4: + occupation",
-        "M5: + municipality & origin",
+        "M5: + municipality of recidence, country of origin",
 
         # Number of tests
         "≥3 assessments",
@@ -203,13 +196,13 @@ df_forrest_plot <- df_forrest_plot |>
         "30–39",
         "20–29",
         "<20",
-        "Exercise",
-        "3 or more times/week",
+        "Exercise frequency",
+        "3 ≥ times/week",
         "1-2 times/week",
         "Never/sometime",
         "Health",
         "Good or very good",
-        "Neither poor nor good",
+        "Neither good nor poor",
         "Poor or very poor"
       )
     ),
@@ -303,6 +296,11 @@ my_cols <- c(
 
 # Create forest plot
 ```{r}
+#| fig.height: 12
+#| fig.width: 8
+#| fig.dpi: 300
+
+
 forest_plot(
   my_results,
   col.key = "subgroup",
@@ -422,12 +420,14 @@ forest_plot(
 
 # Save plot
 ```{r}
+#| eval: false
+
 ggsave(
   here::here(
     "..",
     "results",
     "figures",
-    "forest_plot_ten_yr_lifestyle_interaction_HR.pdf"
+    "forest_plot_ten_yr_lifestyle_interaction_HR_2.pdf"
   ),
   width = 210,
   height = 280,
@@ -440,7 +440,7 @@ ggsave(
     "..",
     "results",
     "figures",
-    "forest_plot_ten_yr_lifestyle_interaction_HR.svg"
+    "forest_plot_ten_yr_lifestyle_interaction_HR_2.svg"
   ),
   width = 210,
   height = 280,
