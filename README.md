@@ -1,5 +1,7 @@
 # Workplace health assessments and short to long-term cardiovascular risk: A propensity score-matched emulated target trial in Swedish workers
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21103683.svg)](https://doi.org/10.5281/zenodo.21103683)
+
 ## Abstract
 
 This study examines the association between Health Profile Assessments (HPA) and
@@ -195,3 +197,11 @@ aggregates and model summaries, never row-level identifiable data.
 Numerical results, figures and rendered reports are **not** included in this
 repository while the manuscript is unpublished. A link to the published article and
 to the rendered results will be added here once the paper is out.
+
+## How to cite
+
+Analysis code archived on Zenodo: https://doi.org/10.5281/zenodo.21103683
+
+Please also cite the article once published (citation to be added). If Zenodo
+provides a "Cite all versions" (concept) DOI, prefer that one so the link always
+resolves to the latest version.
