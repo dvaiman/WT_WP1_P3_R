@@ -231,86 +231,57 @@ RMST differences by subgroup
 ## data
 ```{r}
 
+# Area plot
+# RMST differences by subgroup
 
+## data
 library(showtext)
 font_add_google("Roboto", "roboto")
 showtext_auto()
 
 # --- 1. wrangle -----------------------------------------------------
-rmst_line_data <- rmst_table %>%
+rmst_line_data <- rmst_table |> 
   mutate(
     groups = case_when(
       str_starts(Model, "Age") ~ "Age group",
       str_starts(Model, "Sex") ~ "Sex",
-      TRUE                     ~ Model          # keep original for the rest
-    ),
-    Model = factor(Model, c("Overall", "Sex", "Age group", "HPA count")),
-    # numeric x-axis
-    time_years = readr::parse_number(Time),                    # 5 / 10 / 20
-    # keep factor ordering you already set up
-    Subgroup   = fct_rev(Subgroup)
-  )%>%
-
-  ## ── add τ = 0 for every group / subgroup ─────────────────────────
-  complete(Subgroup, groups,
-           time_years = c(0, 5, 10, 20),      # <-- include 0
-           fill = list(
-             years_gain_per_1000        = 0,
-             years_gain_per_1000_lci    = 0,
-             years_gain_per_1000_uci    = 0,
-             difference                 = 0,
-             difference_lci             = 0,
-             difference_uci             = 0,
-             ΔRMST                      = "0",    # text label if you use it
-             Time                       = "0 yr"  # optional, for consistency
-           )) %>%
-  arrange(Model, Subgroup, time_years)
-
-rmst_line_data |>  print(n = 20)
-
-
-## ---- 1. original wrangling -----------------------------------------
-rmst_line_data <- rmst_table %>%
-  mutate(
-    groups = case_when(
-      str_starts(Model, "Age") ~ "Age group",
-      str_starts(Model, "Sex") ~ "Sex",
+      str_starts(Model, "HPA") ~ "HPA count", 
       TRUE                     ~ Model
     ),
-    groups = factor(groups, c("Overall", "Sex", "Age group", "HPA count")),
-    time_years = readr::parse_number(Time),   # 5 / 10 / 20
+    groups = factor(groups, levels = c("Overall", "HPA count", "Sex", "Age group")),
+    time_years = readr::parse_number(Time),
     Subgroup   = fct_rev(Subgroup)
   )
 
-## ---- 2. make ONE baseline row per (Model, Subgroup) ----------------
-baseline <- rmst_line_data %>%
-  distinct(Model, Subgroup, groups) %>%          # one per curve
+# --- 2. add baseline (time = 0) for each curve ----------------------
+baseline <- rmst_line_data |> 
+  distinct(Model, Subgroup, groups) |> 
   mutate(
-    time_years                   = 0,
-    difference          = 0,
-    difference_lci      = 0,
-    difference_uci      = 0,
-    ΔRMST                        = "0",          # if you keep the label
-    Time                         = "0 yr"        # optional
+    time_years     = 0,
+    difference     = 0,
+    difference_lci = 0,
+    difference_uci = 0,
+    ΔRMST          = "0",
+    Time           = "0 yr"
   )
 
-rmst_line_data0 <- bind_rows(rmst_line_data, baseline) %>%
-  arrange(Model, Subgroup, time_years) |>
-    mutate(Subgroup = fct_reorder(Subgroup,
-                                difference,   # or years_gain_per_1000
-                                .desc = TRUE))
+rmst_line_data0 <- bind_rows(rmst_line_data, baseline) |> 
+  arrange(Model, Subgroup, time_years) |> 
+  mutate(Subgroup = fct_reorder(Subgroup, difference, .desc = TRUE))
 
+rmst_line_data0 |> print(n = 20)
 
+# --- 3. define colors -----------------------------------------------
 my_subgroup_cols <- c(
-  "Overall" = "#418286",
-  "Men"   = "#418286",
-  "Women" = "#e1800f",
+  "Overall"       = "#418286",
+  "HPA, 1 test"   = "#418286",
+  "HPA, 2 tests"  = "grey30",
+  "HPA, ≥3 tests" = "#e1800f",
+  "Men"           = "#418286",
+  "Women"         = "#e1800f",
   "Age grp <35"   = "#e1800f",
   "Age grp 35-49" = "grey30",
-  "Age grp ≥50"   = "#418286",
-  "HPA, 1 test" = "#418286",
-  "HPA, 2 tests" = "grey30",
-  "HPA, ≥3 tests" = "#e1800f"
+  "Age grp ≥50"   = "#418286"
 )
 
 ```

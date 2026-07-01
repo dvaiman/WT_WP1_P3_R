@@ -31,6 +31,7 @@ library(marginaleffects)
 # Data
 ```{r}
 source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
 ```
 
 
@@ -191,7 +192,9 @@ get_hr <- function(fit, model_id, by_var = NULL) {
   hr <- avg_comparisons(
     fit,
     variables = "treated",
-    by = TRUE, # TRUE → one row, could need to be change to by_var for interaction models
+    # one row for main models (by_var = NULL); stratified rows carrying the
+    # by_var column for interaction models, so the left_join below can match.
+    by = if (is.null(by_var)) TRUE else by_var,
     type = "lp",
     transform = "exp"
   ) |>
@@ -303,4 +306,96 @@ openxlsx::write.xlsx(
   here::here("..", "results", "tables", "hr_tbl_1yr_sensitivity_analyses.xlsx")
 )
 
+```
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Additional sensitivity analyses on the primary model (M3)
+
+We refit the **single primary model (M3)** on restricted samples to probe the
+robustness of the main estimate. All use the canonical M3 covariate set
+(`build_m3_formula()`), the standard 10-year cause-specific outcome, and produce
+one tidy row each so the response letter can read every number from a single
+table.
+
+```{r}
+# refit M3 on a (possibly filtered) data set and return one tidy HR row
+fit_m3_sens <- function(data, label) {
+  fit <- coxph(
+    build_m3_formula("Surv(risk_time_art_10yrs, risk_art_flag_10yrs)"),
+    data = data
+  )
+
+  td <- broom::tidy(fit, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(term == "treatedHPA")
+
+  # read counts straight off the fitted object (coxph stores these) — avoids
+  # model.frame(), which fails here because the M3 formula's environment is gone.
+  tibble(
+    analysis  = label,
+    n         = fit$n,
+    events    = fit$nevent,
+    estimate  = td$estimate,
+    conf.low  = td$conf.low,
+    conf.high = td$conf.high,
+    p.value   = td$p.value
+  )
+}
+
+sens_m3 <- bind_rows(
+  # exclude anyone with CVD before their first HPA (referee 2.7)
+  fit_m3_sens(
+    data_cvd |> filter(cvd_art_before_HPA_flag == 0),
+    "M3, excluding prior CVD"
+  ),
+  # restrict to working ages 18–65 at first HPA (referee 2.13).
+  # NB: this drops some matched cluster members; we refit directly on the
+  # restricted set rather than re-matching.
+  fit_m3_sens(
+    data_cvd |> filter(Age >= 18 & Age <= 65),
+    "M3, ages 18–65 at first HPA"
+  )
+)
+
+# pull the M3 row from the one-year landmark fit (fitted above) so the landmark
+# sensitivity HR comes from the same place.
+landmark_m3 <- broom::tidy(
+  fits_m_sens$m3,
+  exponentiate = TRUE, conf.int = TRUE
+) |>
+  filter(term == "treatedHPA") |>
+  transmute(
+    analysis  = "M3, one-year landmark (delayed entry)",
+    n         = fits_m_sens$m3$n,
+    events    = fits_m_sens$m3$nevent,
+    estimate, conf.low, conf.high, p.value
+  )
+
+# analyses requested by reviewers that cannot be run because the variables do
+# not exist in the linked data — recorded explicitly so the response letter is
+# honest rather than left with placeholder numbers.
+unavailable <- tibble(
+  analysis = c(
+    "Employment-history covariate (referee 1.4) — UNAVAILABLE: no employment-history variable in the linked data",
+    "Industry-sector adjustment (referee 2.10) — UNAVAILABLE: no industry/sector code in the linked data"
+  ),
+  n = NA_integer_, events = NA_integer_,
+  estimate = NA_real_, conf.low = NA_real_, conf.high = NA_real_, p.value = NA_real_
+)
+
+sens_summary <- bind_rows(landmark_m3, sens_m3, unavailable) |>
+  mutate(
+    `HR (95% CI)` = if_else(
+      is.na(estimate),
+      NA_character_,
+      sprintf("%.2f (%.2f, %.2f)", estimate, conf.low, conf.high)
+    )
+  )
+
+print(sens_summary, n = nrow(sens_summary))
+
+write_csv(
+  sens_summary,
+  here::here("..", "results", "tables", "m3_sensitivity_summary.csv")
+)
 ```

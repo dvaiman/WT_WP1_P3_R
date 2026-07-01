@@ -1,3 +1,43 @@
+# ──────────────────────────────────────────────────────────────────────
+# Single source of truth for the primary model (M3)
+# ──────────────────────────────────────────────────────────────────────
+# M3 is the single pre-specified primary model: HPA participation adjusted
+# for birth cohort, age, sex, comorbidity, prior CVD and income. Defining
+# the covariate set ONCE here prevents the three scripts that fit M3
+# (26_, 35_, the competing-risks 27b_) from drifting apart. Scripts that
+# need a different survival outcome (e.g. 27_ uses delayed entry) reuse the
+# same right-hand side via build_m3_formula().
+
+# covariates entering the primary model, in fixed order.
+# EducationLevel is deliberately NOT included: it has missing values, so adding it
+# would make M3 complete-case and drop matched cluster members, breaking the
+# strict 1:4 design. Education is used only in the effect-modification models.
+m3_covariates <- c(
+  "treated",
+  "birth_cohort",
+  "Age",
+  "Sex",
+  "comorbidity",
+  "cvd_art_before_HPA_flag",
+  "IncomeLevel_CSFVI"
+)
+
+# right-hand side string, e.g. "treated + birth_cohort + Age + ..."
+m3_rhs <- paste(m3_covariates, collapse = " + ")
+
+# build the full M3 formula given a Surv() left-hand side, so every script
+# fits the identical covariate set regardless of the time/event variables.
+#   lhs : a string such as "Surv(risk_time_art_10yrs, risk_art_flag_10yrs)"
+build_m3_formula <- function(lhs) {
+  stats::as.formula(paste(lhs, "~", m3_rhs))
+}
+
+# convenience: the primary 10-year cause-specific outcome used in 26_/35_
+m3_formula_10yr <- build_m3_formula(
+  "Surv(risk_time_art_10yrs, risk_art_flag_10yrs)"
+)
+
+
 # Functions for hazard and HR
 
 # ──────────────────────────────────────────────────────────────────────

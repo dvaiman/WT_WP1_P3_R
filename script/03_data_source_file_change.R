@@ -52,18 +52,21 @@ df_change <- data_cvd |>
       TRUE ~ "No change"
     ),
 
+    BMI_continious_change = BMI_second - BMI,
+    VO2_continious_change = Astrand_rel_VO2_second - Astrand_rel_VO2,
+
     # BMI change (using ±1 BMI unit threshold)
     BMI_change_first_to_second = case_when(
       is.na(BMI) | is.na(BMI_second) ~ NA_character_,
-      BMI_second - BMI <= -1 ~ "Increase", # BMI decrease ≥1 unit
-      BMI_second - BMI >= 1 ~ "Decrease", # BMI increase ≥1 unit
+      BMI_second - BMI <= -1 ~ "Decrease", # BMI decrease ≥1 unit
+      BMI_second - BMI >= 1 ~ "Increase", # BMI increase ≥1 unit
       TRUE ~ "No change"
     ),
 
     BMI_change_first_to_last = case_when(
       is.na(BMI) | is.na(BMI_last) ~ NA_character_,
-      BMI_last - BMI <= -1 ~ "Increase",
-      BMI_last - BMI >= 1 ~ "Decrease",
+      BMI_last - BMI <= -1 ~ "Decrease",
+      BMI_last - BMI >= 1 ~ "Increase",
       TRUE ~ "No change"
     ),
 
@@ -150,10 +153,19 @@ df_final_analysis <- df_change |>
       treated == "Control" ~ first(days_first_to_second[treated == "HPA"]),
       treated == "HPA" ~ days_first_to_second
     ),
+    BMI_change_continious_first_to_second = case_when(
+      treated == "Control" ~ first(BMI_continious_change[treated == "HPA"]),
+      treated == "HPA" ~ BMI_continious_change
+    ),
+
     BMI_change_first_to_second = case_when(
       treated == "Control" ~
         first(BMI_change_first_to_second[treated == "HPA"]),
       treated == "HPA" ~ BMI_change_first_to_second
+    ),
+    VO2_change_continious_first_to_second = case_when(
+      treated == "Control" ~ first(VO2_continious_change[treated == "HPA"]),
+      treated == "HPA" ~ VO2_continious_change
     ),
 
     VO2_change_first_to_second = case_when(
@@ -285,6 +297,8 @@ df_final_analysis <- df_change |>
     Health_change_first_to_second,
     BMI_change_first_to_second,
     VO2_change_first_to_second,
+    VO2_change_continious_first_to_second,
+    BMI_change_continious_first_to_second,
 
     # Original risk variables (main analysis from first test)
     risk_time_art_10yrs,

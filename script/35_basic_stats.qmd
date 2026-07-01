@@ -22,12 +22,17 @@ Basic statistics for results section
 
 
 ```{r}
-library(tidyvrse)
+library(tidyverse)
+library(survival)
+library(marginaleffects)
+library(broom)
+library(EValue)
 ```
 
 
 ```{r}
 source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
 ```
 
 
@@ -242,25 +247,24 @@ print(hpa_matching_quality)
 
 
 
-# NNT ARR
+# Primary model (M3)
 
 ```{r}
-m3 = coxph(
-  Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-    treated +
-      birth_cohort +
-      Age +
-      Sex +
-      comorbidity +
-      cvd_art_before_HPA_flag +
-      IncomeLevel_CSFVI,
-  data = data_cvd
-)
+# fit the single primary model from the canonical M3 formula (02_functions_...).
+m3 <- coxph(m3_formula_10yr, data = data_cvd)
+
+# live M3 hazard ratio + CI, reused below for the E-value and the report.
+m3_hr_tbl <- broom::tidy(m3, exponentiate = TRUE, conf.int = TRUE) |>
+  dplyr::filter(term == "treatedHPA") |>
+  dplyr::transmute(estimate, conf.low, conf.high, p.value)
+
+m3_hr_tbl
 ```
 
-```{r}
-library(marginaleffects)
 
+# Absolute risk difference (descriptive)
+
+```{r}
 # 1. Marginal survival curves (population-averaged)
 marg_surv <- predictions(
   m3,
@@ -269,37 +273,92 @@ marg_surv <- predictions(
   by = "treated"
 )
 
-# 2. Marginal risk differences at specific time points
+# 2. Population-averaged risk difference at the end of follow-up
 risk_diff_10yr <- comparisons(
   m3,
   variables = "treated",
   type = "survival",
-  newdata = datagrid(treated = c("Control", "HPA")),
-  # This gives you population-averaged risk difference
+  newdata = datagrid(treated = c("Control", "HPA"))
 )
 
-# Convert to risk (1 - survival)
-risk_control <- 1 - 0.017 # 0.017 = 1.7%
-risk_hpa <- 1 - 0.016 # 0.016 = 1.6%
+# Extract the absolute risk difference (ARR) and its CI directly from the model
+# output so the manuscript figure can never drift from the fitted estimate.
+# comparisons() returns the difference on the survival scale; the absolute
+# difference in 10-year risk is its magnitude.
+arr_row <- risk_diff_10yr |>
+  as_tibble() |>
+  slice(1)
 
-# Absolute risk reduction (ARR)
-# Calculate risks (1 - survival)
-risk_control <- 1 - survival_control # 1 - 0.983 = 0.017
-risk_hpa <- 1 - survival_hpa # 1 - 0.984 = 0.016
-ARR <- 0.00182 # 0.182 percentage points lower CVD risk with HPA
-ARR_lower <- 0.00136 # conf.low from risk_diff_10yr
-ARR_upper <- 0.00227 # conf.high from risk_diff_10yr
+ARR        <- abs(arr_row$estimate)
+ARR_lower  <- min(abs(arr_row$conf.low), abs(arr_row$conf.high))
+ARR_upper  <- max(abs(arr_row$conf.low), abs(arr_row$conf.high))
 
-# Public health metrics
-NNT <- 1 / ARR
-ARR_per_1000 <- ARR * 1000
+# descriptive reciprocal — NOT framed as a causal "number needed to treat" or
+# "prevented" (referee 2.11); reported as observed events per N participants.
+events_per_n        <- 1 / ARR
+ARR_per_1000        <- ARR * 1000
 
-cat("Population-averaged 10-year public health metrics:\n")
-cat("Absolute risk reduction:", round(ARR, 4), "(", round(ARR * 100, 2), "%)\n")
-cat("Number needed to treat:", round(NNT, 0), "\n")
-cat(
-  "CVD cases prevented per 1,000 HPA participants:",
-  round(ARR_per_1000, 1),
-  "\n"
+cat("Population-averaged 10-year absolute risk difference (descriptive):\n")
+cat(sprintf(
+  "Absolute risk difference: %.4f (%.4f to %.4f); i.e. %.2f (%.2f to %.2f) percentage points\n",
+  ARR, ARR_lower, ARR_upper, ARR * 100, ARR_lower * 100, ARR_upper * 100
+))
+cat(sprintf(
+  "Equivalent to one fewer observed CVD event per %.0f HPA participants over 10 years\n",
+  events_per_n
+))
+cat(sprintf(
+  "Fewer observed CVD events per 1,000 HPA participants: %.1f\n",
+  ARR_per_1000
+))
+
+arr_summary <- tibble(
+  metric = c("ARR", "ARR_lower", "ARR_upper",
+             "events_per_1_fewer_event", "fewer_events_per_1000"),
+  value  = c(ARR, ARR_lower, ARR_upper, events_per_n, ARR_per_1000)
+)
+
+write_csv(
+  arr_summary,
+  here::here("..", "results", "tables", "absolute_risk_difference.csv")
+)
+```
+
+
+# E-value for the primary estimate
+
+```{r}
+# E-value seeded from the LIVE M3 estimate and CI (not hardcoded), so it always
+# matches the fitted primary model. rare = FALSE because CVD is not a rare
+# outcome over 10 years.
+evalue_m3 <- EValue::evalues.HR(
+  est  = m3_hr_tbl$estimate,
+  lo   = m3_hr_tbl$conf.low,
+  hi   = m3_hr_tbl$conf.high,
+  rare = FALSE
+)
+
+evalue_m3
+
+# tidy export: the point-estimate E-value and the CI E-value (one source of
+# truth reused everywhere). For a protective HR the CI E-value is reported on
+# whichever confidence limit is closest to the null; the package leaves the
+# other limit NA, so take the non-NA value.
+evalue_ci_bounds <- evalue_m3["E-values", c("lower", "upper")]
+evalue_ci_value  <- evalue_ci_bounds[!is.na(evalue_ci_bounds)][1]
+
+evalue_tbl <- tibble(
+  m3_hr        = m3_hr_tbl$estimate,
+  m3_lo        = m3_hr_tbl$conf.low,
+  m3_hi        = m3_hr_tbl$conf.high,
+  evalue_point = evalue_m3["E-values", "point"],
+  evalue_ci    = evalue_ci_value
+)
+
+evalue_tbl
+
+write_csv(
+  evalue_tbl,
+  here::here("..", "results", "tables", "evalue_m3.csv")
 )
 ```

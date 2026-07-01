@@ -45,8 +45,146 @@ df_final_analysis |>
   filter(treated == "Control") # check this
 df_change |> count(first_test_date, treated) |> filter(treated == "Control")
 
+
 df_final_analysis |>
+  mutate(
+    # Convert days to years for standardization
+    years_between_tests = assigned_days_first_to_second / 365.25,
+
+    # Standardize changes per year
+    BMI_change_per_year = BMI_change_continious_first_to_second /
+      years_between_tests,
+    VO2_change_per_year = VO2_change_continious_first_to_second /
+      years_between_tests
+  ) |>
+  select(
+    treated,
+    risk_time_art_10yrs,
+    risk_art_flag_10yrs,
+    BMI_change_continious_first_to_second,
+    BMI_second,
+    BMI,
+    BMI_change_per_year,
+    treated,
+    BMI_change_first_to_second
+  ) |>
+  group_by(BMI_change_first_to_second, treated) |>
+  summarise(
+    n_individuals = n(),
+    n_events = sum(risk_art_flag_10yrs, na.rm = TRUE),
+
+    # Person-time and incidence rate
+    total_person_years = sum(risk_time_art_10yrs, na.rm = TRUE),
+    incidence_rate_per_person_year = n_events / total_person_years,
+    incidence_rate_per_1000_py = (n_events / total_person_years) * 1000,
+    meandays = mean(risk_time_art_10yrs, na.rm = TRUE),
+    mean(BMI_change_per_year),
+    mean(BMI_change_per_year),
+    mean(BMI_second, na.rm = TRUE),
+    mean(BMI, na.rm = TRUE)
+  )
+
+
+df_p <-
+  df_final_analysis |>
+  mutate(
+    # Convert days to years for standardization
+    years_between_tests = assigned_days_first_to_second / 365.25,
+
+    # Standardize changes per year
+    BMI_change_per_year = BMI_change_continious_first_to_second /
+      years_between_tests,
+    VO2_change_per_year = VO2_change_continious_first_to_second /
+      years_between_tests
+  ) |>
+  select(
+    treated,
+    risk_time_art_10yrs,
+    risk_art_flag_10yrs,
+    VO2_change_continious_first_to_second,
+    VO2_change_first_to_second,
+    Astrand_rel_VO2_second,
+    Astrand_rel_VO2,
+    VO2_change_per_year,
+    treated,
+    BMI_change_first_to_second,
+    BMI_change_per_year,
+    Age
+  )
+
+# table
+df_p |> count(VO2_change_first_to_second, treated)
+group_by(VO2_change_first_to_second, treated) |>
+  summarise(
+    age = mean(Age, na.rm = TRUE),
+    time_at_risk = mean(risk_time_art_10yrs, na.rm = TRUE)
+  )
+
+df_plot_data <-
+  df_p |>
+  ########################
   group_by(treated) |>
+  # create bins
+  mutate(bin = ntile(VO2_change_first_to_second, 15)) |>
+  group_by(treated, bin) |>
+  summarise(
+    n_individuals = n(),
+    n_events = sum(risk_art_flag_10yrs, na.rm = TRUE),
+    total_person_years = sum(risk_time_art_10yrs, na.rm = TRUE),
+    mean_BMI_change = mean(BMI_change_per_year, na.rm = TRUE), # Using per_year version
+    mean_vo2_change = mean(VO2_change_per_year, na.rm = TRUE),
+    mean_BMI_change_total = mean(BMI_change_first_to_second, na.rm = TRUE), # Total change
+    .groups = "drop"
+  ) |>
+  # Calculate incidence rate
+  mutate(
+    incidence_rate_1000py = (n_events / total_person_years) * 1000,
+    .groups = "drop"
+  )
+
+df_plot_data |>
+  ggplot(aes(
+    x = mean_vo2_change,
+    y = incidence_rate_1000py,
+    color = treated
+  )) +
+  geom_point(aes(size = n_individuals), alpha = 0.8) +
+  geom_line(linewidth = 1) +
+  # geom_errorbar(
+  #  aes(ymin = ir_lower_ci, ymax = ir_upper_ci),
+  #   width = 0.05,
+  #  alpha = 0.7
+  #) +
+  #scale_color_manual(values = c("HPAs" = "darkblue", "Controls" = "red")) +
+  labs(
+    title = "Incidence rate by BMI change bins",
+    subtitle = "15 equal-sized bins within each treatment group",
+    x = "Mean BMI change per year (kg/m²)",
+    y = "Incidence rate per 1,000 person-years",
+    color = "Treatment group",
+    size = "Sample size"
+  )
+
+##
+
+df_p |>
+  group_by(BMI_change_first_to_second, treated) |>
+
+  summarise(
+    n_individuals = n(),
+    n_events = sum(risk_art_flag_10yrs, na.rm = TRUE),
+
+    # Person-time and incidence rate
+    total_person_years = sum(risk_time_art_10yrs, na.rm = TRUE),
+    incidence_rate_per_person_year = n_events / total_person_years,
+    incidence_rate_per_1000_py = (n_events / total_person_years) * 1000,
+    mean(VO2_change_per_year),
+    mean(Astrand_rel_VO2_second, na.rm = TRUE),
+    mean(Astrand_rel_VO2, na.rm = TRUE)
+  )
+
+df_final_analysis |>
+  group_by(BMI_change_first_to_second, treated) |>
   summarise(
     BMI_change_first_to_second = mean(
       BMI_change_first_to_second == "Increase",
@@ -178,6 +316,365 @@ results_main <- bind_rows(
 )
 
 print(results_main)
+
+
+data
+
+```
+
+
+```{r}
+library(survival)
+library(survminer)
+
+# Create survival object
+surv_obj <- Surv(
+  time = df_final_analysis$risk_time_art_10yrs,
+  event = df_final_analysis$risk_art_flag_10yrs
+)
+
+# Kaplan-Meier curves
+fit <- survfit(surv_obj ~ BMI_change_first_to_second, data = df_final_analysis)
+ggsurvplot(fit, data = df_final_analysis, risk.table = TRUE)
+
+# 2. Cumulative incidence
+df_final_analysis |>
+  mutate(
+    time_groups = cut(
+      risk_time_art_10yrs,
+      breaks = c(0, 1, 2, 5, 10),
+      labels = c("0-1yr", "1-2yr", "2-5yr", "5-10yr")
+    )
+  ) |>
+  group_by(BMI_change_first_to_second, time_groups) |>
+  summarise(
+    events = sum(risk_art_flag_10yrs),
+    person_time = sum(risk_time_art_10yrs),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = time_groups, y = events, fill = BMI_change_first_to_second)) +
+  geom_col(position = "dodge")
+
+# 3. Hazard over time periods
+df_final_analysis |>
+  mutate(time_period = cut(risk_time_art_10yrs, breaks = seq(0, 10, 1))) |>
+  group_by(BMI_change_first_to_second, time_period) |>
+  summarise(
+    event_rate = sum(risk_art_flag_10yrs) / n() * 1000,
+    .groups = "drop"
+  )
+```
+
+# test data
+```{r}
+library(tidyverse)
+library(survival)
+library(ggplot2)
+library(scales)
+
+# Prepare data with standardized VO2 changes
+analysis_data <- df_final_analysis |>
+  mutate(
+    years_between_tests = assigned_days_first_to_second / 365.25,
+    VO2_change_per_year = VO2_change_continious_first_to_second /
+      years_between_tests,
+    BMI_change_per_year = BMI_change_continious_first_to_second /
+      years_between_tests
+  ) |>
+  filter(
+    !is.na(VO2_change_per_year),
+    !is.na(risk_time_art_10yrs),
+    !is.na(risk_art_flag_10yrs)
+  )
+
+# Explore distribution first
+summary(analysis_data$VO2_change_per_year)
+quantile(
+  analysis_data$VO2_change_per_year,
+  probs = c(0, 0.25, 0.5, 0.75, 1),
+  na.rm = TRUE
+)
+
+# Method 1: Data-driven quartiles
+quartile_analysis <- analysis_data |>
+  mutate(
+    VO2_quartile = cut(
+      VO2_change_per_year,
+      breaks = quantile(
+        VO2_change_per_year,
+        c(0, 0.25, 0.5, 0.75, 1),
+        na.rm = TRUE
+      ),
+      include.lowest = TRUE,
+      labels = c("Q1 (lowest)", "Q2", "Q3", "Q4 (highest)")
+    )
+  ) |>
+  group_by(VO2_quartile) |>
+  summarise(
+    n = n(),
+    events = sum(risk_art_flag_10yrs),
+    person_years = sum(risk_time_art_10yrs),
+    incidence_rate_1000py = (events / person_years) * 1000,
+    mean_VO2_change_py = mean(VO2_change_per_year),
+    median_VO2_change_py = median(VO2_change_per_year),
+    VO2_range = paste0(
+      round(min(VO2_change_per_year), 1),
+      " to ",
+      round(max(VO2_change_per_year), 1)
+    ),
+    .groups = "drop"
+  ) |>
+  mutate(
+    # Poisson exact CIs
+    ir_lower_ci = ifelse(
+      events == 0,
+      0,
+      (qchisq(0.025, 2 * events) / 2) / person_years * 1000
+    ),
+    ir_upper_ci = ifelse(
+      events == 0,
+      3.69 / person_years * 1000,
+      (qchisq(0.975, 2 * (events + 1)) / 2) / person_years * 1000
+    )
+  )
+
+print("=== Quartile-based Analysis ===")
+print(quartile_analysis)
+
+# Method 2: Clinically meaningful cut-points
+# Common thresholds: >10% improvement, stable (±10%), >10% decline per year
+clinical_analysis <- analysis_data |>
+  mutate(
+    VO2_clinical_change = case_when(
+      VO2_change_per_year > 2.0 ~ "Major improvement (>2 ml/kg/min/year)",
+      VO2_change_per_year > 0.5 ~ "Moderate improvement (0.5-2.0)",
+      VO2_change_per_year >= -0.5 ~ "Stable (±0.5)",
+      VO2_change_per_year >= -2.0 ~ "Moderate decline (-0.5 to -2.0)",
+      TRUE ~ "Major decline (< -2.0 ml/kg/min/year)"
+    ),
+    VO2_clinical_change = factor(
+      VO2_clinical_change,
+      levels = c(
+        "Major decline (< -2.0 ml/kg/min/year)",
+        "Moderate decline (-0.5 to -2.0)",
+        "Stable (±0.5)",
+        "Moderate improvement (0.5-2.0)",
+        "Major improvement (>2 ml/kg/min/year)"
+      )
+    )
+  ) |>
+  group_by(VO2_clinical_change) |>
+  summarise(
+    n = n(),
+    events = sum(risk_art_flag_10yrs),
+    person_years = sum(risk_time_art_10yrs),
+    incidence_rate_1000py = (events / person_years) * 1000,
+    mean_VO2_change_py = mean(VO2_change_per_year),
+    median_VO2_change_py = median(VO2_change_per_year),
+    .groups = "drop"
+  ) |>
+  mutate(
+    ir_lower_ci = ifelse(
+      events == 0,
+      0,
+      (qchisq(0.025, 2 * events) / 2) / person_years * 1000
+    ),
+    ir_upper_ci = ifelse(
+      events == 0,
+      3.69 / person_years * 1000,
+      (qchisq(0.975, 2 * (events + 1)) / 2) / person_years * 1000
+    )
+  )
+
+print("=== Clinically-based Analysis ===")
+print(clinical_analysis)
+
+# Visualization 1: Binned analysis (computationally efficient)
+binned_data_20 <- analysis_data |>
+  mutate(
+    VO2_bin = cut_number(VO2_change_per_year, n = 20) # 20 equal-sized bins for smooth curve
+  ) |>
+  group_by(VO2_bin) |>
+  summarise(
+    n = n(),
+    events = sum(risk_art_flag_10yrs),
+    person_years = sum(risk_time_art_10yrs),
+    incidence_rate_1000py = (events / person_years) * 1000,
+    mean_VO2_change = mean(VO2_change_per_year),
+    .groups = "drop"
+  ) |>
+  mutate(
+    ir_lower_ci = ifelse(
+      events == 0,
+      0,
+      (qchisq(0.025, 2 * events) / 2) / person_years * 1000
+    ),
+    ir_upper_ci = ifelse(
+      events == 0,
+      3.69 / person_years * 1000,
+      (qchisq(0.975, 2 * (events + 1)) / 2) / person_years * 1000
+    )
+  )
+
+p1 <- binned_data_20 |>
+  ggplot(aes(x = mean_VO2_change, y = incidence_rate_1000py)) +
+  geom_ribbon(
+    aes(ymin = ir_lower_ci, ymax = ir_upper_ci),
+    alpha = 0.3,
+    fill = "blue"
+  ) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_point(aes(size = n), alpha = 0.8, color = "blue") +
+  labs(
+    title = "Incidence rate by continuous VO2 change",
+    x = "VO2 change per year (ml/kg/min)",
+    y = "Incidence rate per 1,000 person-years",
+    size = "Sample size",
+    subtitle = "20 equal-sized bins with 95% confidence intervals"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.title = element_text(size = 10)
+  )
+
+# Visualization 2: Decile analysis for detailed pattern
+decile_data <- analysis_data |>
+  mutate(
+    VO2_decile = ntile(VO2_change_per_year, 10)
+  ) |>
+  group_by(VO2_decile) |>
+  summarise(
+    n = n(),
+    events = sum(risk_art_flag_10yrs),
+    person_years = sum(risk_time_art_10yrs),
+    incidence_rate_1000py = (events / person_years) * 1000,
+    mean_VO2_change = mean(VO2_change_per_year),
+    median_VO2_change = median(VO2_change_per_year),
+    VO2_range = paste0(
+      round(min(VO2_change_per_year), 1),
+      " to ",
+      round(max(VO2_change_per_year), 1)
+    ),
+    .groups = "drop"
+  ) |>
+  mutate(
+    ir_lower_ci = ifelse(
+      events == 0,
+      0,
+      (qchisq(0.025, 2 * events) / 2) / person_years * 1000
+    ),
+    ir_upper_ci = ifelse(
+      events == 0,
+      3.69 / person_years * 1000,
+      (qchisq(0.975, 2 * (events + 1)) / 2) / person_years * 1000
+    )
+  )
+
+p2 <- decile_data |>
+  ggplot(aes(x = factor(VO2_decile), y = incidence_rate_1000py)) +
+  geom_col(alpha = 0.7, fill = "steelblue") +
+  geom_errorbar(aes(ymin = ir_lower_ci, ymax = ir_upper_ci), width = 0.2) +
+  labs(
+    title = "Incidence rate by VO2 change deciles",
+    x = "VO2 change decile (1=lowest, 10=highest change)",
+    y = "Incidence rate per 1,000 person-years",
+    subtitle = "Each decile contains ~10,000 individuals"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.title = element_text(size = 10)
+  )
+
+# Visualization 3: Clinical categories (aggregated - no individual points)
+clinical_summary <- analysis_data |>
+  mutate(
+    VO2_clinical_change = case_when(
+      VO2_change_per_year > 2.0 ~ "Major improvement",
+      VO2_change_per_year > 0.5 ~ "Moderate improvement",
+      VO2_change_per_year >= -0.5 ~ "Stable",
+      VO2_change_per_year >= -2.0 ~ "Moderate decline",
+      TRUE ~ "Major decline"
+    ),
+    VO2_clinical_change = factor(
+      VO2_clinical_change,
+      levels = c(
+        "Major decline",
+        "Moderate decline",
+        "Stable",
+        "Moderate improvement",
+        "Major improvement"
+      )
+    )
+  ) |>
+  group_by(VO2_clinical_change) |>
+  summarise(
+    n = n(),
+    events = sum(risk_art_flag_10yrs),
+    person_years = sum(risk_time_art_10yrs),
+    incidence_rate_1000py = (events / person_years) * 1000,
+    .groups = "drop"
+  ) |>
+  mutate(
+    ir_lower_ci = ifelse(
+      events == 0,
+      0,
+      (qchisq(0.025, 2 * events) / 2) / person_years * 1000
+    ),
+    ir_upper_ci = ifelse(
+      events == 0,
+      3.69 / person_years * 1000,
+      (qchisq(0.975, 2 * (events + 1)) / 2) / person_years * 1000
+    )
+  )
+
+p3 <- clinical_summary |>
+  ggplot(aes(x = VO2_clinical_change, y = incidence_rate_1000py)) +
+  geom_col(alpha = 0.7, fill = "darkgreen") +
+  geom_errorbar(aes(ymin = ir_lower_ci, ymax = ir_upper_ci), width = 0.2) +
+  geom_text(aes(label = paste0("n=", comma(n))), vjust = -0.5, size = 3) +
+  labs(
+    title = "Incidence rates by clinical VO2 change categories",
+    x = "VO2 change category",
+    y = "Incidence rate per 1,000 person-years"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.title = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Print plots
+print(p1)
+print(p2)
+print(p3)
+
+# Print decile table for detailed examination
+print("=== Decile Analysis ===")
+print(decile_data)
+
+# Optional: Random sample for exploration if needed
+# set.seed(123)
+# sample_data <- analysis_data |> slice_sample(n = 1000)
+# Write code for individual exploration on sample if needed
+
+# Summary statistics for the continuous variable
+continuous_summary <- analysis_data |>
+  summarise(
+    n = n(),
+    mean_VO2_change = mean(VO2_change_per_year),
+    sd_VO2_change = sd(VO2_change_per_year),
+    median_VO2_change = median(VO2_change_per_year),
+    q25 = quantile(VO2_change_per_year, 0.25),
+    q75 = quantile(VO2_change_per_year, 0.75),
+    min_change = min(VO2_change_per_year),
+    max_change = max(VO2_change_per_year)
+  )
+
+print("=== Continuous VO2 change distribution ===")
+print(continuous_summary)
 ```
 
 
@@ -511,5 +1008,5 @@ forest_plot <- plot_data |>
   )
 
 # Print the forest plot
-print(forest_plot)
+forest_plot
 ```

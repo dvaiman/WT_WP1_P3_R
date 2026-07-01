@@ -25,6 +25,7 @@ library(flexsurv)
 library(tidyverse)
 library(marginaleffects)
 library(survival)
+library(broom)
 
 ```
 
@@ -99,85 +100,103 @@ data_mun  <- data_cvd |>
 
 ## models
 
+We fit the models grouped by their role rather than as a flat, positionally
+indexed list. This makes the single pre-specified primary model explicit and
+prevents the earlier bug where a model meant one thing here and was extracted
+as another downstream. Bias-probe / lifestyle interactions (HPA-only) live in
+their own script (26b) so they cannot leak into the main results.
+
 ```{r}
-fits_m <- list(
+# fit_primary: the single pre-specified primary model (M3), built from the
+# one canonical M3 formula defined in 02_functions_source_file.R so it can
+# never drift from the M3 fitted in 35_ or the competing-risks script.
+fit_primary <- coxph(m3_formula_10yr, data = data_cvd)
 
-  m1 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated + birth_cohort,
-             data = data_cvd),
-
-  m2 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag,
-             data = data_cvd),
-
-  m3 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI,
-             data = data_cvd),
-
-  m4 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated + ssyk_WBHL_group + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI,
-             data = data_occ),
-
-  m5 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI + ssyk_WBHL_group +
-               KommunSize + Place_of_origin,
-             data = data_mun),
-
-  m6 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * Sex + birth_cohort + Age +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI,
-             data = data_cvd),
-
-  m7 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * age_group + Sex + birth_cohort +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI,
-             data = data_cvd),
-
-  m8 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * ssyk_WBHL_group + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag +
-               IncomeLevel_CSFVI,
-             data = data_occ),
-
-  m9 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * IncomeLevel_CSFVI + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag,
-             data = data_cvd),
-
-  m10 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * EducationLevel + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag,
-             data = data_cvd),
-
-  m11 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * SSYK + birth_cohort + Age + Sex +
-               comorbidity + cvd_art_before_HPA_flag,
-             data = data_occ |> filter(SSYK != "Military") |>
-               mutate(SSYK = fct_drop(SSYK))),
-
-    m12 = coxph(Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-               treated * n_tests_within_5_fac_vs_ctrl + Age + Sex +
-               birth_cohort + comorbidity +
-               cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
-             data = data_cvd |>
-               mutate(
-                 n_tests_within_5_fac_vs_ctrl = fct_drop(n_tests_within_5_fac_vs_ctrl)
-               ))
-
-
+# fits_sensitivity: adjustment-set sensitivity models around the primary.
+#   m1 = birth cohort only; m2 = + age/sex/comorbidity/prior CVD;
+#   m4 = + occupation; m5 = + municipality & origin.
+fits_sensitivity <- list(
+  m1 = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated + birth_cohort,
+    data = data_cvd
+  ),
+  m2 = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  ),
+  m4 = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated + ssyk_WBHL_group + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+    data = data_occ
+  ),
+  m5 = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI +
+      ssyk_WBHL_group + KommunSize + Place_of_origin,
+    data = data_mun
+  )
 )
 
-write_rds(fits_m, here::here("..", "results", "models", "cox_ten_year_m.rds"))
+# fits_effectmod: PRE-SPECIFIED effect-modification questions (sex, age,
+# education), each a treated * modifier interaction on the M3 adjustment set.
+fits_effectmod <- list(
+  sex = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated * Sex + birth_cohort + Age +
+      comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+    data = data_cvd
+  ),
+  age = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated * age_group + Sex + birth_cohort +
+      comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI,
+    data = data_cvd
+  ),
+  education = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated * EducationLevel + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  )
+)
 
+# fits_effectmod_exploratory: additional, NOT pre-specified effect-modification
+# (income, detailed occupation) kept for completeness but labelled exploratory.
+fits_effectmod_exploratory <- list(
+  income = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated * IncomeLevel_CSFVI + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag,
+    data = data_cvd
+  ),
+  occupation = coxph(
+    Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
+      treated * SSYK + birth_cohort + Age + Sex +
+      comorbidity + cvd_art_before_HPA_flag,
+    data = data_occ |>
+      filter(SSYK != "Military") |>
+      mutate(SSYK = fct_drop(SSYK))
+  )
+)
+
+# Save one named container; downstream scripts read elements by name, never
+# by position.
+cox_ten_year_models <- list(
+  fit_primary                 = fit_primary,
+  fits_sensitivity            = fits_sensitivity,
+  fits_effectmod              = fits_effectmod,
+  fits_effectmod_exploratory  = fits_effectmod_exploratory
+)
+
+write_rds(
+  cox_ten_year_models,
+  here::here("..", "results", "models", "cox_ten_year_models.rds")
+)
 ```
 
 ## main model (M1–M5) estimates
@@ -209,194 +228,108 @@ get_main <- function(fit, model_id) {
   bind_cols(td, counts)
 }
 
-tbl_main <- imap_dfr(fits_m[1:5], \(fit, nm) get_main(fit, nm))
+# Assemble the five main models in display order. M3 is the primary fit; the
+# others come from fits_sensitivity. The m1..m5 codes are kept only as the
+# stable identifiers the forest-plot script (32) expects.
+fits_main <- list(
+  m1 = fits_sensitivity$m1,
+  m2 = fits_sensitivity$m2,
+  m3 = fit_primary,
+  m4 = fits_sensitivity$m4,
+  m5 = fits_sensitivity$m5
+)
+
+tbl_main <- imap_dfr(fits_main, \(fit, nm) get_main(fit, nm))
 ```
 
 
 
-## socio demographics (M6–M8)
+## effect-modification estimates
 ```{r}
+# Map each named effect-modification model to (a) the stratifying variable it
+# is averaged over and (b) the stable exposure code used by the forest plot.
+# sex/age/education are pre-specified; income/occupation are exploratory.
+effectmod_fits <- c(fits_effectmod, fits_effectmod_exploratory)
 
-# 1) define the correct grouping variable for each model name
-socio_by <- c(
-  m6 = "Sex",
-  m7 = "age_group",
-  m8 = "ssyk_WBHL_group",
-  m9 = "IncomeLevel_CSFVI",
-  m10 = "EducationLevel",
-  m11 = "SSYK"
+effectmod_by <- c(
+  sex        = "Sex",
+  age        = "age_group",
+  education  = "EducationLevel",
+  income     = "IncomeLevel_CSFVI",
+  occupation = "SSYK"
 )
 
-# 2) run only models m6–m8, pulling the right by_var from socio_by
+effectmod_code <- c(
+  sex        = "m6",
+  age        = "m7",
+  education  = "m10",
+  income     = "m9",
+  occupation = "m11"
+)
+
 tbl_int_sociodemographics <- imap_dfr(
-  fits_m[6:11],               # list entries m6, m7, m8
+  effectmod_fits,
   \(fit, nm) {
-    by_var <- socio_by[[nm]]      # look up "Sex", "age_group", or "ssyk_WBHL_group"
+    by_var <- effectmod_by[[nm]]
     get_hr(fit, by_var) |>
-      mutate(exposure = nm, .before = 1)
+      mutate(exposure = effectmod_code[[nm]], .before = 1)
   }
 )
-
-
-# fit_inc <-
-# get_hr(m9, "IncomeLevel_CSFVI")
-#
-# tbl_int_sociodemographics <- bind_rows(
-#   tbl_int_sociodemographics,
-#   fit_inc |> mutate(exposure = "m9", .before = 1)
-# )
 ```
 
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Cox Lifestyle models
-
-M3 and different sociodemographic interaction variables
-
-## create models
-
-```{r}
-
-
-
-exposures <- c(
-  vo2    = "vo2_cat",
-  bmi    = "BMI_cat",
-  exer   = "Exercise_cat",
-  health = "Health_cat",
-  tests  = "n_tests_within_5_fac_vs_ctrl"
-)
-## 0 ── fixed covariates ------------------------------------------------
-cov_base_vars <- c(
-  "Sex", "Age", "birth_cohort", "comorbidity",
-  "cvd_art_before_HPA_flag", "IncomeLevel_CSFVI"
-)
-cov_base <- paste(cov_base_vars, collapse = " + ")
-
-## 1 ── fit one Cox model per exposure *with* interaction ---------------
-fits <- imap(
-  exposures,
-  ~ {
-    fml <- as.formula(
-      glue::glue(
-        "Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~
-         treated * {.x} + {cov_base}"
-      )
-    )
-
-
-    write_rds(fits,
-              here::here("..", "results", "models", "ten_yr_lifestyle_interaction_fits.rds")
-    )
-
-    # keep *all* rows for the interaction model, but drop rows
-    # missing the exposure itself (not the composite factor)
-    clean_dat <- data_cvd |>
-      drop_na(all_of(.x))  %>%      # exposure-specific NA removal
-      group_by(id_cluster) %>%               # ensure ≥ 5 usable rows / cluster
-      filter(n() >= 5) %>%
-      ungroup()
-
-    coxph(fml, data = clean_dat)
-  }
-)
-
-
-## iterate over every model in `fits` ----------------------------------
-hr_tbl_all <- imap_dfr(
-  fits,                               # named list of cox models
-  \(fit, nm) {
-    by_var <- exposures[[nm]]         # e.g. "BMI_cat"
-    get_hr(fit, by_var) |>
-      mutate(exposure = nm, .before = 1)
-  }
-)
-
-hr_tbl_all_df <-
-hr_tbl_all |> as_tibble() |>
-  mutate(
-    groups = coalesce(
-      vo2_cat, BMI_cat, Exercise_cat, Health_cat, n_tests_within_5_fac_vs_ctrl),
-    exposure = recode(exposure,
-                      vo2    = "VO2",
-                      bmi    = "BMI",
-                      exer   = "Exercise",
-                      health = "Health",
-                      tests  = "Tests")
-  ) |>
-  select(exposure, groups, n_Control,  n_HPA, events_Control, events_HPA, term,    contrast,      estimate,  conf.low, conf.high, p.value     ) |>
-  print(n = 200)
-
-
-
-write_csv(
-  hr_tbl_all_df,
-  here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
-)
-
-# hr_tbl_all_df <-
-# read_csv(
-#
-#   here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
-# )
-```
+# Bias-probe / lifestyle interactions live in 26b_bias_probes.qmd
+# (HPA-only variables, controls forced to the reference category). They are kept
+# out of this main-results pipeline on purpose so they cannot leak into the
+# pre-specified results.
 # ───────────────────────────────────────────────────────────────────────────────
 
 
-# join model data
+# join main results (for the forest plot)
 
 ```{r}
-
 tbl_main
 tbl_int_sociodemographics |> as_tibble()
-hr_tbl_all  |> as_tibble()
 
 
-# 1. MAIN MODELS (M1–M5)  -------------
+# 1. MAIN MODELS (M1–M5) ------------------------------------------------
 tbl_main2 <- tbl_main |>
-  rename(exposure = model) |>          # rename “model” → “exposure”
-  mutate(groups = exposure) |>            # one overall stratum
+  rename(exposure = model) |>          # rename "model" → "exposure"
+  mutate(groups = exposure) |>         # one overall stratum
   select(
     exposure, groups,
     n_Control, events_Control,
-    n_HPA,     events_HPA,
+    n_HPA, events_HPA,
     term,
     estimate, conf.low, conf.high, p.value
   )
 
-# 2. SOCIODEMOGRAPHIC INTERACTIONS (M6–M8) ----------------------------
+# 2. EFFECT MODIFICATION (sex/age/education pre-specified; income/occupation
+#    exploratory) — already carries the m6/m7/m9/m10/m11 codes the plot uses.
 tbl_int2 <- tbl_int_sociodemographics |>
-  rename(exposure = exposure) |>       # already “m6” etc
   mutate(
-    groups = coalesce(                # pick whichever stratum is non-NA
-      Sex, age_group, SSYK, EducationLevel, IncomeLevel_CSFVI, ssyk_WBHL_group
+    groups = coalesce(                 # pick whichever stratum is non-NA
+      Sex, age_group, SSYK, EducationLevel, IncomeLevel_CSFVI
     )
   ) |>
   select(
     exposure, groups,
     n_Control, events_Control,
-    n_HPA,     events_HPA,
+    n_HPA, events_HPA,
     term, contrast,
     estimate, conf.low, conf.high, p.value
   )
 
-# 3. LIFESTYLE INTERACTIONS (VO2, BMI, …, TESTS) -----------------------
-# hr_tbl_all_df was already selected to exactly these column names:
-tbl_exp2 <- hr_tbl_all_df
+# 3. BIND main + effect modification -----------------------------------
+final_hr_tbl <- bind_rows(tbl_main2, tbl_int2)
 
-# 4. BIND THEM ALL TOGETHER --------------------------------------------
-final_hr_tbl <- bind_rows(tbl_main2, tbl_int2, tbl_exp2)
-
-
-
-final2 <- final_hr_tbl %>%
+final_main <- final_hr_tbl %>%
   mutate(
     block = case_when(
-      exposure %in% paste0("m", 1:5)      ~ "Main models",
-      exposure == "Tests"                 ~ "Number of tests",
-      exposure %in% c("m6", "m7", "m8")    ~ "Sociodemographics",
-      exposure %in% c("VO2","BMI","Exercise","Health") ~ "Lifestyle related",
-      TRUE                                ~ "Other"
+      exposure %in% paste0("m", 1:5) ~ "Main models",
+      exposure %in% c("m6", "m7", "m9", "m10", "m11") ~ "Sociodemographics",
+      TRUE ~ "Other"
     ),
     label = case_when(
       exposure == "m1" ~ "M1: birth cohort",
@@ -404,36 +337,24 @@ final2 <- final_hr_tbl %>%
       exposure == "m3" ~ "M3: + income",
       exposure == "m4" ~ "M4: + occupation",
       exposure == "m5" ~ "M5: + municipality & origin",
-      exposure == "Tests" ~ paste0(groups),
-      exposure == "m6" ~ paste0(groups),
       exposure == "m7" ~ paste0(groups, " yrs"),
-      exposure == "m8" ~ paste0(groups),
-      exposure == "m9" ~ paste0(groups),
-      exposure == "m10" ~ paste0(groups),
-      exposure == "m11" ~ paste0(groups),
-      exposure == "VO2" ~ paste0("VO2max: ", groups),
-      exposure == "BMI" ~ paste0("BMI: ", groups),
-      exposure == "Exercise" ~ paste0("Exercise: ", groups),
-      exposure == "Health" ~ paste0("Health: ", groups),
+      exposure %in% c("m6", "m9", "m10", "m11") ~ paste0(groups),
       TRUE ~ groups
     )
   ) %>%
-  # and order blocks in the desired sequence:
   mutate(
-    block = factor(block,
-                   levels = c("Main models",
-                              "Number of tests",
-                              "Sociodemographics",
-                              "Lifestyle related"))
+    block = factor(
+      block,
+      levels = c("Main models", "Sociodemographics")
+    )
   ) %>%
   arrange(block, exposure, groups) %>%
   mutate(row = row_number())
 
 
-
 write_csv(
-  final2,
-  here::here("..", "results", "models", "ten_yr_lifestyle_interaction_HR.csv")
+  final_main,
+  here::here("..", "results", "models", "cox_ten_year_main_HR.csv")
 )
 ```
 

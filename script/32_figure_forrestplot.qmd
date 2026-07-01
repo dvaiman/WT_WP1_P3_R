@@ -30,17 +30,29 @@ showtext_auto()
 
 # Load and prepare data
 ```{r}
-df_forrest_plot <-
+# The results now come from two sources, kept separate upstream so the
+# exploratory bias probes cannot leak into the pre-specified results:
+#   - cox_ten_year_main_HR.csv         : PRE-SPECIFIED. Main models (M1–M5) and
+#       effect modification (sex/age/education pre-specified; income/occupation
+#       exploratory), written by 26_.
+#   - ten_yr_biasprobe_interaction_HR.csv : EXPLORATORY bias probes (number of
+#       assessments + lifestyle, HPA-only), written by 26b_.
+df_main <-
   read.csv(here::here(
-    "..",
-    "results",
-    "models",
-    "ten_yr_lifestyle_interaction_HR.csv"
+    "..", "results", "models", "cox_ten_year_main_HR.csv"
   ))
+
+df_biasprobe <-
+  read.csv(here::here(
+    "..", "results", "models", "ten_yr_biasprobe_interaction_HR.csv"
+  ))
+
+df_forrest_plot <- dplyr::bind_rows(df_main, df_biasprobe)
 
 # Data preparation and sorting
 df_forrest_plot <- df_forrest_plot |>
-  # Filter out old occupation groups
+  # Filter out the redundant 4-level occupation interaction (kept as detailed
+  # SSYK, exposure m11, instead)
   filter(!exposure %in% c("m8")) |>
 
   # Create participant/event summary columns
@@ -100,7 +112,7 @@ df_forrest_plot <- df_forrest_plot |>
     label = case_when(
       label == "M1: birth cohort" ~ "M1: birth cohort",
       label == "M2: + age, sex, comorbidity & CVD" ~ "M2: + age, sex, prior comorbidity, prior CVD",
-      label == "M3: + income" ~ "M3: + income", 
+      label == "M3: + income" ~ "M3: + income",
       label == "M4: + occupation" ~ "M4: + occupation",
       label == "M5: + municipality & origin" ~ "M5: + municipality of recidence, country of origin",
       
@@ -319,7 +331,7 @@ forest_plot(
   # Axis settings
   xlab = "HPA vs controls\nHazard ratio (95% CI)",
   xlim = c(0.4, 1.5),
-  xticks = c(0.6, .8, 1, 1),
+  xticks = c(0.6, 0.8, 1, 1.2),
   nullval = 1,
 
   # Column settings
@@ -366,7 +378,12 @@ forest_plot(
       ),
 
       labs(
-        caption = "*Lifestyle related variables were available only for HPA participants"
+        caption = paste(
+          "Main models (M1–M5) and effect modification by sex, age and education are pre-specified.",
+          "Number of assessments and lifestyle blocks are exploratory bias probes.",
+          "*Lifestyle related variables were available only for HPA participants.",
+          sep = "\n"
+        )
       ),
 
       scale_fill_manual(
@@ -383,15 +400,9 @@ forest_plot(
         axis.ticks.x.top = element_line(colour = "black"),
         panel.background = element_rect(fill = "white", color = "white"),
         plot.background = element_rect(fill = "white", color = "white"),
-        text = element_text(
-          family = c(
-            'Source Sans 3',
-            'roboto-flex',
-            'dejavu-bold',
-            'roboto',
-            'Source Sans 3'
-          )
-        ),
+        # single font family: ggplot2 4.0's text engine cannot recycle a vector
+        # of families across all text elements (the old 5-font vector errored).
+        text = element_text(family = "sourcesans"),
         panel.grid.major.x = element_blank(),
         panel.grid.major.y = element_blank(),
         panel.grid.minor = element_blank(),

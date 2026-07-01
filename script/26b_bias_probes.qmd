@@ -1,0 +1,172 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+# Description
+
+Exploratory **bias probes**, separated from the main results pipeline (26_).
+
+These lifestyle variables (VO2max, BMI, exercise, self-rated health) and the
+number-of-assessments dose-response are measured **only in HPA participants**;
+controls inherit the matched HPA participant's category within the cluster. They
+therefore cannot estimate a causal effect — they are reported, per the reviewers,
+as exploratory probes of whether the association tracks plausible bias / selection
+gradients, not as effect-modification or dose-response evidence. Keeping them in
+their own script and their own output file (`ten_yr_biasprobe_interaction_HR.csv`)
+prevents them leaking into the pre-specified results.
+
+
+# Libraries
+```{r}
+library(flexsurv)
+library(tidyverse)
+library(marginaleffects)
+library(survival)
+```
+
+
+# Data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
+
+
+# helper to get HRs and arm-specific counts (same as 26_) ---------------
+get_hr <- function(fit, by_var) {
+  hr <- fit |>
+    avg_comparisons(
+      variables = "treated",
+      by        = by_var,
+      type      = "lp",
+      transform = "exp"
+    )
+
+  mf       <- model.frame(fit)
+  surv_obj <- mf[[1]]
+
+  counts <- mf |>
+    mutate(event = surv_obj[, "status"]) |>
+    mutate(arm = if_else(treated %in% c(1, "HPA"), "HPA", "Control")) |>
+    group_by(.data[[by_var]], arm) |>
+    summarise(n = n(), events = sum(event), .groups = "drop") |>
+    tidyr::pivot_wider(
+      names_from  = arm,
+      values_from = c(n, events),
+      names_glue  = "{.value}_{arm}"
+    )
+
+  dplyr::left_join(hr, counts, by = by_var)
+}
+```
+
+
+# Fit one interaction model per probe
+```{r}
+# exposure name -> the HPA-only variable it interacts with treated
+exposures <- c(
+  vo2    = "vo2_cat",
+  bmi    = "BMI_cat",
+  exer   = "Exercise_cat",
+  health = "Health_cat",
+  tests  = "n_tests_within_5_fac_vs_ctrl"
+)
+
+# fixed adjustment set (the M3 covariates minus treated, which enters via the
+# interaction term)
+cov_base <- paste(
+  setdiff(m3_covariates, "treated"),
+  collapse = " + "
+)
+
+# fit one Cox model per probe, each with a treated * probe interaction.
+fits_biasprobe <- imap(
+  exposures,
+  \(var, nm) {
+    fml <- as.formula(
+      glue::glue(
+        "Surv(risk_time_art_10yrs, risk_art_flag_10yrs) ~ treated * {var} + {cov_base}"
+      )
+    )
+
+    # drop rows missing the probe itself, then keep clusters with >= 5 usable rows
+    clean_dat <- data_cvd |>
+      drop_na(all_of(var)) |>
+      group_by(id_cluster) |>
+      filter(n() >= 5) |>
+      ungroup()
+
+    coxph(fml, data = clean_dat)
+  }
+)
+
+# write the fitted objects AFTER the loop completes (previously this sat inside
+# the loop and wrote a half-built object).
+write_rds(
+  fits_biasprobe,
+  here::here("..", "results", "models", "ten_yr_biasprobe_interaction_fits.rds")
+)
+```
+
+
+# Extract HRs into one tidy table
+```{r}
+hr_tbl_all <- imap_dfr(
+  fits_biasprobe,
+  \(fit, nm) {
+    by_var <- exposures[[nm]]
+    get_hr(fit, by_var) |>
+      mutate(exposure = nm, .before = 1)
+  }
+)
+
+# build the forest-plot-ready rows: stable exposure codes, block, label.
+biasprobe_hr <- hr_tbl_all |>
+  as_tibble() |>
+  mutate(
+    groups = coalesce(
+      vo2_cat, BMI_cat, Exercise_cat, Health_cat, n_tests_within_5_fac_vs_ctrl
+    ),
+    exposure = recode(
+      exposure,
+      vo2    = "VO2",
+      bmi    = "BMI",
+      exer   = "Exercise",
+      health = "Health",
+      tests  = "Tests"
+    ),
+    block = if_else(exposure == "Tests", "Number of tests", "Lifestyle related"),
+    label = case_when(
+      exposure == "Tests"    ~ paste0(groups),
+      exposure == "VO2"      ~ paste0("VO2max: ", groups),
+      exposure == "BMI"      ~ paste0("BMI: ", groups),
+      exposure == "Exercise" ~ paste0("Exercise: ", groups),
+      exposure == "Health"   ~ paste0("Health: ", groups),
+      TRUE                   ~ groups
+    )
+  ) |>
+  select(
+    exposure, block, label, groups,
+    n_Control, events_Control, n_HPA, events_HPA,
+    term, contrast, estimate, conf.low, conf.high, p.value
+  )
+
+biasprobe_hr |> print(n = 200)
+
+write_csv(
+  biasprobe_hr,
+  here::here("..", "results", "models", "ten_yr_biasprobe_interaction_HR.csv")
+)
+```

@@ -1,0 +1,219 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+# Description
+
+Competing-risk sensitivity analysis (referees 2.8, 2.12). The pre-specified
+primary analysis is the **cause-specific** Cox model that censors at death.
+Here we additionally treat death as a competing event and report the
+**subdistribution hazard ratio** (Fine–Gray) plus cumulative incidence functions
+that account for death. This is a sensitivity analysis, not a replacement for the
+primary cause-specific estimate.
+
+The covariate set is the single canonical M3 set defined in
+`02_functions_source_file.R`.
+
+
+# Libraries
+```{r}
+library(tidyverse)
+library(survival)   # finegray(), coxph(), multistate survfit()
+library(broom)
+```
+
+
+# Data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
+```
+
+
+# Build the competing-event status
+```{r}
+# Within the 10-year window:
+#   1 = CVD event   (the cause-specific event flag)
+#   2 = death       (no CVD, and follow-up ended because of death)
+#   0 = censored    (administrative / end of follow-up)
+#
+# risk_end_art_10yrs is pmin(CVD date, death date, admin censor); so when there
+# is no CVD and death == risk_end, death is the terminal event. If the admin
+# censor came first, DODSDAT > risk_end and the person is censored.
+data_cr <- data_cvd |>
+  mutate(
+    DODSDAT            = as.Date(DODSDAT),
+    risk_end_art_10yrs = as.Date(risk_end_art_10yrs),
+    cr_status = case_when(
+      risk_art_flag_10yrs == 1 ~ 1L,
+      !is.na(DODSDAT) & DODSDAT <= risk_end_art_10yrs ~ 2L,
+      TRUE ~ 0L
+    ),
+    cr_status = factor(cr_status, levels = c(0, 1, 2),
+                       labels = c("censored", "cvd", "death"))
+  )
+
+# verification: the three categories must partition the cohort
+data_cr |> count(treated, cr_status)
+data_cr |>
+  summarise(n = n(), sum_status = sum(table(cr_status))) # sum must equal n
+```
+
+
+# Subdistribution hazard ratio (Fine–Gray) — memory-safe
+
+`survival::finegray()` physically expands the data to subdistribution risk sets,
+which on ~2 million rows can exhaust memory. We therefore prefer
+**`fastcmprsk::fastCrr()`**, which fits the Fine–Gray model with an O(n)
+forward–backward scan and **no row expansion**, so it runs on the full cohort with
+modest memory. If `fastcmprsk` is not installed, the code falls back to fitting the
+model on a **random subsample of whole matched clusters** (preserving the 1:4
+matching and the estimand) via `survival::finegray()`.
+
+`fastcmprsk` and its dependency `dynpred` are CRAN-archived; install from the CRAN
+archive with:
+`remotes::install_version("dynpred"); remotes::install_version("fastcmprsk")`.
+
+```{r}
+# prefer the full-data O(n) Fine–Gray; fall back to a memory-safe subsample.
+use_fastcmprsk <- requireNamespace("fastcmprsk", quietly = TRUE)
+
+if (use_fastcmprsk) {
+  library(fastcmprsk)
+
+  # numeric status for fastcmprsk: 0 = censored, 1 = CVD, 2 = death
+  fc_df <- data_cr |>
+    mutate(fstatus = as.integer(cr_status) - 1L) |>
+    select(all_of(c("risk_time_art_10yrs", "fstatus", m3_covariates))) |>
+    drop_na()
+
+  message(sprintf("[27b] fastcmprsk Fine-Gray on full data (%s subjects).",
+                  scales::comma(nrow(fc_df))))
+
+  fc_form <- as.formula(
+    paste("Crisk(risk_time_art_10yrs, fstatus, cencode = 0, failcode = 1) ~", m3_rhs)
+  )
+
+  # Variance is bootstrap-based. useMultipleCores = TRUE forks the process and
+  # each fork works on the full ~2M-row data, which can exhaust RAM and crash R —
+  # so we keep it single-core. B is the number of bootstrap reps: lower it (e.g.
+  # 50) if the CI step is too slow, raise it for a more stable CI.
+  fc_fit <- fastCrr(
+    fc_form,
+    data        = fc_df,
+    variance    = TRUE,
+    var.control = varianceControl(B = 100, useMultipleCores = FALSE)
+  )
+
+  # fastCrr returns UNNAMED coefficients in model-matrix column order; label them
+  # so we can pull the treated term reliably.
+  cov_names <- colnames(model.matrix(as.formula(paste("~", m3_rhs)), data = fc_df))[-1]
+  b  <- setNames(fc_fit$coef, cov_names)
+  se <- setNames(sqrt(diag(fc_fit$var)), cov_names)
+  i  <- which(names(b) == "treatedHPA")
+
+  shr_tbl <- tibble(
+    analysis  = "Fine-Gray subdistribution HR (death competing; fastcmprsk, full data)",
+    estimate  = exp(b[i]),
+    conf.low  = exp(b[i] - 1.96 * se[i]),
+    conf.high = exp(b[i] + 1.96 * se[i]),
+    p.value   = 2 * pnorm(-abs(b[i] / se[i]))
+  )
+} else {
+  # fallback: subsample whole clusters, then survival::finegray() + weighted Cox
+  set.seed(20240601)
+  target_clusters <- 60000  # ~300,000 subjects at 1:4; raise if memory allows
+
+  keep_clusters <- data_cr |>
+    distinct(id_cluster) |>
+    slice_sample(n = min(target_clusters, dplyr::n_distinct(data_cr$id_cluster))) |>
+    pull(id_cluster)
+
+  fg_input <- data_cr |>
+    filter(id_cluster %in% keep_clusters) |>
+    select(all_of(c("cr_status", "risk_time_art_10yrs", m3_covariates))) |>
+    drop_na()  # NB: id_cluster intentionally excluded so it is not a covariate
+
+  message(sprintf(
+    "[27b] fastcmprsk not found — finegray on %s subjects from %s clusters (subsample).",
+    scales::comma(nrow(fg_input)), scales::comma(length(keep_clusters))
+  ))
+
+  fg_cvd <- finegray(
+    Surv(risk_time_art_10yrs, cr_status) ~ .,
+    data  = fg_input,
+    etype = "cvd"
+  )
+
+  fit_fg <- coxph(
+    build_m3_formula("Surv(fgstart, fgstop, fgstatus)"),
+    data    = fg_cvd,
+    weights = fgwt
+  )
+
+  shr_tbl <- broom::tidy(fit_fg, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(term == "treatedHPA") |>
+    transmute(
+      analysis = sprintf(
+        "Fine-Gray subdistribution HR (death competing; %s-cluster subsample)",
+        scales::comma(length(keep_clusters))
+      ),
+      estimate, conf.low, conf.high, p.value
+    )
+}
+
+shr_tbl
+
+write_csv(
+  shr_tbl,
+  here::here("..", "results", "tables", "competing_risks_shr.csv")
+)
+```
+
+
+# Cumulative incidence functions accounting for death
+```{r}
+# Aalen–Johansen cumulative incidence by arm (survival >= 3.x multistate).
+cif_fit <- survfit(Surv(risk_time_art_10yrs, cr_status) ~ treated, data = data_cr)
+
+# tidy the per-state cumulative incidence (probability in each competing state)
+cif_df <- broom::tidy(cif_fit) |>
+  filter(state %in% c("cvd", "death")) |>
+  mutate(
+    years = time / 365.25,
+    arm   = str_remove(strata, "treated="),
+    state = recode(state, cvd = "CVD", death = "Death")
+  )
+
+cif_plot <- cif_df |>
+  ggplot(aes(x = years, y = estimate, colour = arm)) +
+  geom_step() +
+  facet_wrap(~state, scales = "free_y") +
+  labs(
+    x = "Years since first HPA",
+    y = "Cumulative incidence",
+    colour = NULL,
+    title = "Cumulative incidence of CVD and death by arm"
+  ) +
+  theme_minimal()
+
+cif_plot
+
+ggsave(
+  here::here("..", "results", "figures", "competing_risks_cif.pdf"),
+  plot = cif_plot, width = 210, height = 120, units = "mm", dpi = 300
+)
+```

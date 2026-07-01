@@ -393,6 +393,27 @@ data_cvd <-
   ) |>
   ungroup()
 
+# enforce strict 1:4 matching for the analytic data set.
+# Matching (10_) targets 4 controls per HPA participant, but yearly nearest-
+# neighbour matching without replacement can leave some clusters short of 4
+# controls. The design requires complete 1:4 sets, so we keep only clusters with
+# exactly one HPA participant and four controls. This is the single place the
+# rule is applied, so every downstream script uses the same strictly-matched data.
+n_before_1to4 <- dplyr::n_distinct(data_cvd$id_cluster)
+
+data_cvd <- data_cvd |>
+  group_by(id_cluster) |>
+  filter(sum(treated == "HPA") == 1, sum(treated == "Control") == 4) |>
+  ungroup()
+
+# report how many clusters were dropped for being incomplete (visible when sourced)
+message(sprintf(
+  "[01_data_source] strict 1:4 filter: kept %s of %s clusters (dropped %s incomplete).",
+  scales::comma(dplyr::n_distinct(data_cvd$id_cluster)),
+  scales::comma(n_before_1to4),
+  scales::comma(n_before_1to4 - dplyr::n_distinct(data_cvd$id_cluster))
+))
+
 # create dataset wit matched controls for those who have NA in kommunsize and place of origin are removed
 
 #data_cvd <-
