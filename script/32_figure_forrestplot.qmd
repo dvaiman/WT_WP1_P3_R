@@ -22,10 +22,17 @@ library(systemfonts)
 
 # Setup fonts
 ```{r}
-font_add_google("Source Sans 3", "sourcesans")
+# We deliberately do NOT use showtext + Google Fonts here. ckbplotr renders the
+# row labels with marquee, which uses systemfonts to find a BOLD face for
+# **heading** markdown; showtext registers a family that marquee can't see a bold
+# face for, so headings wouldn't render bold (and Google Fonts needs internet).
+# Using the system default font (systemfonts, which has a bold face) makes the
+# bold headings work and renders all glyphs correctly.
+showtext::showtext_auto(FALSE)   # ensure showtext is not intercepting text
+plot_family <- ""                # "" = graphics-device / systemfonts default
 
-font_add_google("Roboto", "roboto")
-showtext_auto()
+# To use a specific font instead, install it system-wide and set e.g.
+# plot_family <- "Source Sans 3"  (it must be visible to systemfonts::system_fonts()).
 ```
 
 # Load and prepare data
@@ -112,7 +119,7 @@ df_forrest_plot <- df_forrest_plot |>
     label = case_when(
       label == "M1: birth cohort" ~ "M1: birth cohort",
       label == "M2: + age, sex, comorbidity & CVD" ~ "M2: + age, sex, prior comorbidity, prior CVD",
-      label == "M3: + income" ~ "M3: + income",
+      label == "M3: + income" ~ "Age, sex, birth cohort,  \ncomorbidity, prior CVD & income",
       label == "M4: + occupation" ~ "M4: + occupation",
       label == "M5: + municipality & origin" ~ "M5: + municipality of recidence, country of origin",
       
@@ -151,7 +158,7 @@ df_forrest_plot <- df_forrest_plot |>
         # Main models
         "M1: birth cohort",
         "M2: + age, sex, prior comorbidity, prior CVD",
-        "M3: + income",
+        "Age, sex, birth cohort,  \ncomorbidity, prior CVD & income",
         "M4: + occupation",
         "M5: + municipality of recidence, country of origin",
 
@@ -219,28 +226,45 @@ df_forrest_plot <- df_forrest_plot |>
       )
     ),
 
-    # Clean up block names
+    # Reassign blocks for the pre-specified vs exploratory framing.
+    #  Pre-specified : the primary model (M3) + effect modification (sex/age/education)
+    #  Exploratory   : the adjustment ladder (M1,M2,M4,M5), socioeconomic/occupation
+    #                  effect modification, number of HPAs, and lifestyle bias probes
     block = case_when(
-      block == "Main models" ~ "Main models",
+      exposure == "m3" ~ "Primary model",
+      exposure %in% c("m1", "m2", "m4", "m5") ~ "Adjustment sets",
+      exposure %in% c("m6", "m7", "m10") ~ "Effect modification",
+      label %in% c("Sex", "Age group", "Education") ~ "Effect modification",
+      exposure %in% c("m9", "m11") ~ "Socioeconomic",
+      label %in% c("Occupation", "Income (% of median)") ~ "Socioeconomic",
       block == "Number of tests" ~ "HPAs within 5 yrs",
       block == "Lifestyle related" ~ "Lifestyle related*",
       TRUE ~ block
     ),
 
+    # top-level tier used to split / label the figures
+    tier = if_else(
+      block %in% c("Primary model", "Effect modification"),
+      "Pre-specified", "Exploratory"
+    ),
+
     block = factor(
       block,
       levels = c(
-        "Main models",
+        "Primary model",
+        "Effect modification",
+        "Adjustment sets",
+        "Socioeconomic",
         "HPAs within 5 yrs",
-        "Sociodemographics",
         "Lifestyle related*"
       )
     ),
+    tier = factor(tier, levels = c("Pre-specified", "Exploratory")),
 
-    # Set group colors
+    # colour key (all main/adjustment models share one colour)
     group_color = case_when(
-      block == "Main models" ~ block,
-      block == "HPAs within 5 yrs" ~ block,
+      exposure %in% c("m1", "m2", "m3", "m4", "m5") ~ "Main models",
+      block == "HPAs within 5 yrs" ~ as.character(block),
       exposure == "m6" ~ "Sex",
       exposure == "m7" ~ "Age",
       exposure == "m10" ~ "Education",
@@ -250,8 +274,8 @@ df_forrest_plot <- df_forrest_plot |>
     )
   ) |>
 
-  # Final cleanup
-  arrange(block, label) |>
+  # order by tier, then block, then label
+  arrange(tier, block, label) |>
   mutate(
     row = row_number(),
     across(
@@ -261,201 +285,209 @@ df_forrest_plot <- df_forrest_plot |>
   )
 ```
 
-# Prepare data for forest plot
+# Forest-plot builder and outputs
+
+We produce three figures from the same data:
+
+- **combined** — one figure with two labelled tiers (Pre-specified / Exploratory).
+- **main** — pre-specified only: the primary model **M3** + effect modification
+  by sex, age and education.
+- **supplementary** — everything secondary: the adjustment ladder (M1, M2, M4, M5),
+  socioeconomic/occupation effect modification, number of HPAs within 5 years, and
+  lifestyle bias probes.
+
 ```{r}
-# Build plotting data
-my_results <- df_forrest_plot |>
-  transmute(
-    subgroup = as.character(label),
-    ctrl = ctrl,
-    hpa = hpa,
-    est = estimate,
-    lci = conf.low,
-    uci = conf.high,
-    exposure = exposure,
-    block = block,
-    group_color = group_color
-  ) |>
-  drop_na(subgroup)
-
-# Build row labels
-row_labels <- df_forrest_plot |>
-  transmute(
-    row = row,
-    subgroup = as.character(label),
-    group = as.character(block)
-  ) |>
-  distinct() |>
-  mutate(label = subgroup) |>
-  arrange(row) |>
-  drop_na(subgroup)
-
-# Define color palette
+# colour palette (keyed on the group_color values)
 my_cols <- c(
-  "Main models" = "#418286",
+  "Main models"       = "#418286",
   "HPAs within 5 yrs" = "#e1800f",
-  "Sex" = "#418286",
-  "Age" = "#e1800f",
-  "Education" = "#418286",
-  "Occupation" = "#e1800f",
-  "Income" = "#418286",
-  "BMI" = "#e1800f",
-  "Exercise" = "#418286",
-  "Health" = "#e1800f",
-  "VO2" = "#418286"
+  "Sex"               = "#418286",
+  "Age"               = "#e1800f",
+  "Education"         = "#418286",
+  "Occupation"       = "#e1800f",
+  "Income"            = "#418286",
+  "BMI"               = "#e1800f",
+  "Exercise"          = "#418286",
+  "Health"            = "#e1800f",
+  "VO2"               = "#418286"
 )
-```
 
-# Create forest plot
-```{r}
-#| fig.height: 12
-#| fig.width: 8
-#| fig.dpi: 300
+# replace unicode glyphs that don't render reliably. NB: keep the real ≥ glyph —
+# writing ">=" makes marquee treat a leading ">" as a blockquote and mangles the
+# label. Only the VO2max sub/superscripts and the en dash need swapping.
+fix_glyphs <- function(x) {
+  x |>
+    str_replace_all(fixed("VO₂max (mL·kg⁻¹·min⁻¹)"),
+                    "VO2max (mL/kg/min)") |>
+    str_replace_all(fixed("VO₂max"), "VO2max") |>
+    str_replace_all("–", "-")       # en dash -> hyphen
+}
 
+# wrap heading text in marquee bold markdown (ckbplotr renders row labels with
+# marquee::element_marquee, so **...** renders bold)
+bold_md <- function(x) paste0("**", x, "**")
 
-forest_plot(
-  my_results,
-  col.key = "subgroup",
-  row.labels = row_labels,
-  row.labels.levels = c("group", "label"),
-  col.lci = "lci",
-  col.uci = "uci",
-  exponentiate = FALSE,
+# build one forest plot from a (possibly filtered) slice of df_forrest_plot.
+# row_levels: c("tier","group","label") for combined, c("group","label") for splits.
+# (No in-plot caption — the HPA-only footnote goes in the manuscript figure legend.)
+build_forest <- function(dat, row_levels) {
+  results <- dat |>
+    transmute(
+      subgroup = as.character(label),
+      ctrl, hpa,
+      est = estimate, lci = conf.low, uci = conf.high,
+      exposure, block, group_color
+    ) |>
+    drop_na(subgroup) |>
+    # bold the sub-header rows (those with no estimate) and fix glyphs
+    mutate(
+      subgroup = if_else(is.na(est), bold_md(fix_glyphs(subgroup)), fix_glyphs(subgroup))
+    )
 
-  # Layout positioning
-  col.left.pos = unit(c(1.2, 31), "mm"),
-  left.space = unit(60, "mm"),
-  col.right.pos = unit(1.2, "mm"),
-  right.space = unit(32.7, "mm"),
+  labels <- dat |>
+    transmute(
+      row,
+      subgroup = as.character(label),
+      group    = as.character(block),
+      tier     = as.character(tier),
+      est      = estimate
+    ) |>
+    distinct() |>
+    mutate(
+      # match the bolded/fixed subgroup in `results`, and bold the block/tier headings
+      subgroup = if_else(is.na(est), bold_md(fix_glyphs(subgroup)), fix_glyphs(subgroup)),
+      label = subgroup,
+      group = bold_md(fix_glyphs(group)),
+      tier  = bold_md(tier)
+    ) |>
+    select(-est) |>
+    arrange(row) |>
+    drop_na(label)
 
-  # Axis settings
-  xlab = "HPA vs controls\nHazard ratio (95% CI)",
-  xlim = c(0.4, 1.5),
-  xticks = c(0.6, 0.8, 1, 1.2),
-  nullval = 1,
-
-  # Column settings
-  col.left = c("ctrl", "hpa"),
-  col.left.heading = c("Control\nN (events)", "HPA\nN (events)"),
-  col.right.heading = "Hazard ratio\n(95% CI)",
-
-  # Visual styling
-  shape = 15,
-  pointsize = 2.5,
-  plotcolour = "grey20",
-  colour = "group_color",
-  cicolour = "group_color",
-  fill = "#e1800f",
-  plot.margin = margin(8, 8, 2, 8, "mm"),
-
-  # Additional styling
-  addarg = list(nullline = c("linetype = 'solid'", "colour = 'grey20'")),
-
-  add = list(
-    start = list(
-      geom_vline(
-        xintercept = c(0.6, 0.8, 1.2),
-        linetype = "dashed",
-        colour = "grey",
-        size = 0.3
+  # build the ggplot layers appended after the forest plot; caption is optional
+  end_layers <- list(
+    scale_x_log10(
+      breaks = c(0.4, 0.6, 0.8, 1, 1.2, 1.5),
+      labels = c("0.4", "0.6", "0.8", "1", "1.2", "1.5"),
+      expand = expansion(mult = 0),
+      sec.axis = dup_axis(
+        name = NULL,
+        breaks = c(.6, 0.8, 1, 1.2),
+        labels = c("0.6", "0.8", "1", "1.2")
       )
     ),
-    end = list(
-      scale_x_log10(
-        breaks = c(0.4, 0.6, 0.8, 1, 1.2, 1.5),
-        labels = c("0.4", "0.6", "0.8", "1", "1.2", "1.5"),
-        expand = expansion(mult = 0),
-        sec.axis = dup_axis(
-          name = NULL,
-          breaks = c(.6, 0.8, 1, 1.2),
-          labels = c("0.6", "0.8", "1", "1.2")
-        )
-      ),
-
-      scale_colour_manual(
-        values = my_cols,
-        name = "Exposure\nblock"
-      ),
-
-      labs(
-        caption = paste(
-          "Main models (M1–M5) and effect modification by sex, age and education are pre-specified.",
-          "Number of assessments and lifestyle blocks are exploratory bias probes.",
-          "*Lifestyle related variables were available only for HPA participants.",
-          sep = "\n"
-        )
-      ),
-
-      scale_fill_manual(
-        values = my_cols,
-        guide = "none"
-      ),
-
-      theme(
-        axis.title.x.bottom = element_blank(),
-        axis.title.x.top = element_text(face = "bold", vjust = 1),
-        axis.text.x.top = element_text(),
-        axis.line.x.top = element_blank(),
-        axis.ticks.length.x.top = unit(0, "mm"),
-        axis.ticks.x.top = element_line(colour = "black"),
-        panel.background = element_rect(fill = "white", color = "white"),
-        plot.background = element_rect(fill = "white", color = "white"),
-        # single font family: ggplot2 4.0's text engine cannot recycle a vector
-        # of families across all text elements (the old 5-font vector errored).
-        text = element_text(family = "sourcesans"),
-        panel.grid.major.x = element_blank(),
-        panel.grid.major.y = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.caption = element_text(
-          hjust = 2.2,
-          size = 9,
-          face = "italic",
-          margin = margin(t = 5)
-        )
-      ),
-
-      annotate(
-        "segment",
-        x = 0.75,
-        xend = 1.25,
-        y = Inf,
-        yend = Inf,
-        colour = "grey60",
-        size = 0.5,
-        inherit.aes = FALSE
+    scale_colour_manual(values = my_cols, name = "Exposure\nblock"),
+    scale_fill_manual(values = my_cols, guide = "none"),
+    theme(
+      axis.title.x.bottom = element_blank(),
+      axis.title.x.top = element_text(face = "bold", vjust = 1),
+      axis.text.x.top = element_text(),
+      axis.line.x.top = element_blank(),
+      axis.ticks.length.x.top = unit(0, "mm"),
+      axis.ticks.x.top = element_line(colour = "black"),
+      panel.background = element_rect(fill = "white", color = "white"),
+      plot.background = element_rect(fill = "white", color = "white"),
+      text = element_text(family = plot_family),
+      panel.grid.major.x = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      plot.caption = element_text(
+        hjust = 0, size = 9, face = "italic", margin = margin(t = 5)
       )
     )
   )
-)
+
+  forest_plot(
+    results,
+    col.key = "subgroup",
+    row.labels = labels,
+    row.labels.levels = row_levels,
+    col.lci = "lci",
+    col.uci = "uci",
+    exponentiate = FALSE,
+    col.left.pos = unit(c(1.2, 31), "mm"),
+    left.space = unit(60, "mm"),
+    col.right.pos = unit(1.2, "mm"),
+    right.space = unit(32.7, "mm"),
+    xlab = "HPA vs controls\nHazard ratio (95% CI)",
+    xlim = c(0.4, 1.5),
+    xticks = c(0.6, 0.8, 1, 1.2),
+    nullval = 1,
+    col.left = c("ctrl", "hpa"),
+    col.left.heading = c("Control\nN (events)", "HPA\nN (events)"),
+    col.right.heading = "Hazard ratio\n(95% CI)",
+    shape = 15,
+    pointsize = 2.5,
+    plotcolour = "grey20",
+    colour = "group_color",
+    cicolour = "group_color",
+    fill = "#e1800f",
+    plot.margin = margin(8, 8, 2, 8, "mm"),
+    addarg = list(nullline = c("linetype = 'solid'", "colour = 'grey20'")),
+    add = list(
+      start = list(
+        geom_vline(
+          xintercept = c(0.6, 0.8, 1.2),
+          linetype = "dashed", colour = "grey", size = 0.3
+        )
+      ),
+      end = end_layers
+    )
+  )$plot  # forest_plot() returns list(plot, code); keep the ggplot
+}
+
+# save a plot to pdf (always) + svg (if svglite is installed; height in mm).
+# Use the cairo pdf device so the PDF matches the systemfonts rendering (bold
+# headings + correct glyphs); the default pdf() device can mis-substitute fonts.
+save_forest <- function(p, stub, height = 280) {
+  ggsave(
+    here::here("..", "results", "figures", paste0(stub, ".pdf")),
+    plot = p, width = 210, height = height, units = "mm", dpi = 300,
+    device = grDevices::cairo_pdf
+  )
+  if (requireNamespace("svglite", quietly = TRUE)) {
+    ggsave(
+      here::here("..", "results", "figures", paste0(stub, ".svg")),
+      plot = p, width = 210, height = height, units = "mm", dpi = 300
+    )
+  } else {
+    message("svglite not installed — SVG skipped for ", stub, " (PDF saved).")
+  }
+}
 ```
 
-# Save plot
+## Combined figure (two tiers)
 ```{r}
-#| eval: false
-
-ggsave(
-  here::here(
-    "..",
-    "results",
-    "figures",
-    "forest_plot_ten_yr_lifestyle_interaction_HR_2.pdf"
-  ),
-  width = 210,
-  height = 280,
-  units = "mm",
-  dpi = 300
+#| fig.height: 14
+#| fig.width: 8
+p_combined <- build_forest(
+  df_forrest_plot,
+  row_levels = c("tier", "group", "label")
 )
+p_combined
+save_forest(p_combined, "forest_plot_combined", height = 320)
+```
 
-ggsave(
-  here::here(
-    "..",
-    "results",
-    "figures",
-    "forest_plot_ten_yr_lifestyle_interaction_HR_2.svg"
-  ),
-  width = 210,
-  height = 280,
-  units = "mm",
-  dpi = 300
+## Main figure (pre-specified only: M3 + effect modification)
+```{r}
+#| fig.height: 5
+#| fig.width: 8
+p_main <- build_forest(
+  df_forrest_plot |> filter(tier == "Pre-specified") |> mutate(row = row_number()),
+  row_levels = c("group", "label")
 )
+p_main
+save_forest(p_main, "forest_plot_main", height = 130)
+```
+
+## Supplementary figure (adjustment ladder + exploratory)
+```{r}
+#| fig.height: 11
+#| fig.width: 8
+p_supp <- build_forest(
+  df_forrest_plot |> filter(tier == "Exploratory") |> mutate(row = row_number()),
+  row_levels = c("group", "label")
+)
+p_supp
+save_forest(p_supp, "forest_plot_supplementary", height = 250)
 ```
