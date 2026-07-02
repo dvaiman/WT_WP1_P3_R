@@ -436,22 +436,27 @@ build_forest <- function(dat, row_levels) {
   )$plot  # forest_plot() returns list(plot, code); keep the ggplot
 }
 
-# save a plot to pdf (always) + svg (if svglite is installed; height in mm).
-# Use the cairo pdf device so the PDF matches the systemfonts rendering (bold
-# headings + correct glyphs); the default pdf() device can mis-substitute fonts.
+# Save each figure as PNG (raster) + SVG (vector). We use the ragg and svglite
+# devices because ckbplotr renders row labels with marquee, which needs a device
+# that supports the glyph API for the **bold** headings. The cairo_pdf device is
+# broken on this machine ("failed to load cairo DLL") and the base pdf() device
+# does not render marquee bold, so we do NOT write a PDF here. If a PDF is
+# required, open the SVG in Illustrator/Affinity/Inkscape and export to PDF.
 save_forest <- function(p, stub, height = 280) {
+  png_dev <- if (requireNamespace("ragg", quietly = TRUE)) ragg::agg_png else "png"
   ggsave(
-    here::here("..", "results", "figures", paste0(stub, ".pdf")),
+    here::here("..", "results", "figures", paste0(stub, ".png")),
     plot = p, width = 210, height = height, units = "mm", dpi = 300,
-    device = grDevices::cairo_pdf
+    device = png_dev
   )
   if (requireNamespace("svglite", quietly = TRUE)) {
     ggsave(
       here::here("..", "results", "figures", paste0(stub, ".svg")),
-      plot = p, width = 210, height = height, units = "mm", dpi = 300
+      plot = p, width = 210, height = height, units = "mm",
+      device = svglite::svglite
     )
   } else {
-    message("svglite not installed — SVG skipped for ", stub, " (PDF saved).")
+    message("svglite not installed — SVG skipped for ", stub, " (PNG saved).")
   }
 }
 ```
