@@ -1,0 +1,352 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+# Description
+
+Cohort flow / CONSORT reconciliation (referee 1.8). The final analytic N has been
+reported inconsistently across the manuscript, abstract, both TARGET tables and
+the title (414,537 vs 418,285 HPA participants; 1,673,136 vs 1,673,140 controls).
+
+This script computes the exclusion cascade **in code**, from the matched cohort
+through to the final analytic data set, and emits the final N as a **single
+value** (`results/tables/cohort_flow.csv`). The manuscript, tables and title
+should all read from this one number. Resolve the discrepancy here first —
+everything else depends on it.
+
+
+# Libraries
+```{r}
+library(tidyverse)
+```
+
+
+# HPA exclusion cascade (raw database → cleaned study population)
+
+Streamlined version of the WP1 data-cleaning cascade (`dtrackr`): from the raw HPA
+database to the cleaned HPA population that feeds the matching. This produces the
+exact exclusion counts for the manuscript CONSORT so they reconcile with the
+analytic N (the earlier text's exclusions summed to 414,537, but the analytic
+cohort is 418,283 — re-run this to get the correct counts).
+
+NOTE: reads the raw HPA + SCB files (identifiable — in-environment only). Adjust the
+`XXXXXX` DNR folder name to your path, and run in a UTF-8 locale.
+
+```{r}
+#| purl: false
+# (excluded from the batch pipeline: reads external identifiable files; run this
+#  chunk interactively to generate the CONSORT counts + flowchart.)
+library(dtrackr)
+
+# paths — edit the DNR folder name to match your environment
+hpa_dir <- here::here(
+  "..",
+  "..",
+  "..",
+  "..",
+  "HPI (DNR XXXXXX)",
+  "Data HPI registeruttag 2023"
+)
+hpa_path <- file.path(
+  hpa_dir,
+  "HPI",
+  "HPI clean",
+  "EEB_hpb_clean_2023-10-16.csv"
+)
+scb_path <- file.path(
+  hpa_dir,
+  "SCB",
+  "SCB clean",
+  "Grunduppgifter_2023-09-24.csv"
+)
+scbvars_path <- file.path(
+  hpa_dir,
+  "SCB",
+  "Leverans",
+  "Leverans_20240306",
+  "with_hpi_lopnr",
+  "6.organization_variables",
+  "organization_data.csv"
+)
+
+# Read the files fully and let the joins carry the columns through (as in the
+# original cleaning script) — LoneInk / Income_Sources_Category live in the SCB
+# files but not necessarily where you'd guess, so we don't pre-select.
+hpa <- read_csv(hpa_path, show_col_types = FALSE) |>
+  mutate(
+    SymptomBackNeck = if_else(
+      SymptomBackNeck %in% c(7, 8),
+      NA_real_,
+      SymptomBackNeck
+    )
+  )
+
+scb <- read_csv(scb_path, show_col_types = FALSE)
+scb_vars <- read_csv(scbvars_path, show_col_types = FALSE)
+
+df1 <- hpa |>
+  left_join(scb, by = join_by(LopNr, Performed, Year)) |>
+  left_join(scb_vars, by = join_by(LopNr, Performed, Year))
+
+# --- locate the income variables before the exclusions ----------------------
+# exclude_all() below references LoneInk and Income_Sources_Category. If either
+# name collides across the joined files it is suffixed (.x / .y) and the bare
+# name disappears, or it may live in a SCB file we are not reading. Report where
+# each one actually is and stop with a clear message rather than dtrackr's
+# cryptic "column doesn't exist" from inside exclude_all().
+locate_var <- function(v) {
+  in_file <- c(
+    hpa = v %in% names(hpa),
+    scb = v %in% names(scb),
+    scb_vars = v %in% names(scb_vars)
+  )
+  matched <- grep(paste0("^", v, "(\\.|$)"), names(df1), value = TRUE)
+  message(
+    v,
+    " -> in df1 as: ",
+    if (length(matched)) paste(matched, collapse = ", ") else "NONE",
+    " | source file(s): ",
+    if (any(in_file)) {
+      paste(names(in_file)[in_file], collapse = ", ")
+    } else {
+      "NONE"
+    }
+  )
+  invisible(matched)
+}
+invisible(lapply(c("LoneInk", "Income_Sources_Category"), locate_var))
+
+stopifnot(
+  "LoneInk is not a column in df1 — see the message above and adjust the reads/joins" = "LoneInk" %in%
+    names(df1),
+  "Income_Sources_Category is not a column in df1 — see the message above" = "Income_Sources_Category" %in%
+    names(df1)
+)
+
+options(
+  dtrackr.default_message = "n={formatC(.count, big.mark = ',', format = 'fg')}"
+)
+
+hpa_cascade <- df1 |>
+  # one row per person: their first HPA, up to 2021
+  arrange(LopNr, Performed) |>
+  mutate(hpa_number = row_number(), .by = LopNr) |>
+  filter(hpa_number == 1, Year <= 2021) |>
+  track(
+    .headline = "First HPA per person (through 2021), n={formatC(.count, big.mark = ',')}    "
+  ) |>
+  # inclusion criteria as ONE step: >=2 physical AND >=2 questionnaire variables
+  filter(
+    rowSums(
+      !is.na(pick(
+        EkB_rel_VO2,
+        Astrand_rel_VO2,
+        HeightCM,
+        WeightKG,
+        BloodPressureSystolic,
+        BloodPressureDiastolic
+      ))
+    ) >=
+      2,
+    rowSums(
+      !is.na(pick(
+        ExerciseAnswer,
+        TobaccoSmoking,
+        Diet,
+        Health,
+        StressOverall,
+        SymptomBackNeck
+      ))
+    ) >=
+      2,
+    .messages = "<2 physical or <2 questionnaire variables, n={formatC(.excluded, big.mark = ',', format = 'fg')}"
+  ) |>
+  status("n={formatC(.count, big.mark = ',', format = 'fg')}") |>
+  exclude_all(
+    Year <
+      1995 ~ "HPAs before 1995, n={formatC(.excluded, big.mark = ',', format = 'fg')}",
+    Age <
+      18 ~ "Under 18 years of age, n={formatC(.excluded, big.mark = ',', format = 'fg')}",
+    LoneInk == 0 |
+      is.na(
+        LoneInk
+      ) ~ "No verified income, n={formatC(.excluded, big.mark = ',', format = 'fg')}",
+    Income_Sources_Category == "No Income Sources" |
+      is.na(Income_Sources_Category) ~
+      "No verified income source, n={formatC(.excluded, big.mark = ',', format = 'fg')}"
+  ) |>
+  comment(
+    "n={formatC(.count, big.mark = ',')}"
+  )
+
+# Free the large raw objects before sourcing 01 (which reads ~130 MB and builds
+# the 2M-row data_cvd) — holding df1 + the SCB reads at the same time is what
+# tips memory over on the M-series Mac. hpa_cascade keeps its own copy of the
+# rows it needs, so this is safe.
+rm(df1, hpa, scb, scb_vars)
+gc()
+
+# Step 6 (final): matching + strict 1:4. The analytic HPA participants are those
+# retained in data_cvd (built and 1:4-filtered in 01_data_source_file.R); the
+# HPA in the cleaned population but NOT in data_cvd are the ones lost to matching
+# / dropped as incomplete 1:4 clusters. This turns the cleaned population into
+# the final analytic N in the same flow.
+source(here::here("script", "01_data_source_file.R"))
+analytic_hpa_ids <- data_cvd |>
+  filter(treated == "HPA") |>
+  pull(LopNr) |>
+  unique()
+
+hpa_cascade <- hpa_cascade |>
+  filter(
+    LopNr %in% analytic_hpa_ids,
+    .messages = "Excluded: not matched 1:4 / incomplete cluster, n={formatC(.excluded, big.mark = ',', format = 'fg')}"
+  ) |>
+  ungroup(
+    .headline = "Final sample, n={formatC(.count, big.mark = ',')}  "
+  )
+
+# CONSORT flowchart + the endpoint count, which should now equal the analytic N
+hpa_cascade |>
+  flowchart(
+    filename = here::here(
+      "..",
+      "results",
+      "figures",
+      "hpa_exclusion_flowchart"
+    ),
+    formats = c("png", "pdf")
+  )
+
+cat(
+  "Final analytic HPA participants:",
+  format(nrow(hpa_cascade), big.mark = ","),
+  "\n"
+)
+```
+
+
+# Final analytic data set (the one the models actually use)
+```{r}
+# data_cvd is the analytic file the survival models are fitted on. Its row count,
+# split by arm, IS the final analytic N.
+source(here::here("script", "01_data_source_file.R"))
+
+final_counts <- data_cvd |>
+  count(treated, name = "n")
+
+final_counts
+
+final_hpa <- final_counts |> filter(treated == "HPA") |> pull(n)
+final_control <- final_counts |> filter(treated == "Control") |> pull(n)
+
+# 1:4 matching ratio check. 01_data_source_file.R enforces strict 1:4 (one HPA
+# + four controls per cluster), so controls MUST equal 4 × HPA here. Fail loudly
+# if not — the design requires complete 1:4 sets.
+ratio_check <- tibble(
+  hpa = final_hpa,
+  control = final_control,
+  expected_4x = final_hpa * 4,
+  control_matches_4x = final_control == final_hpa * 4
+)
+
+ratio_check
+
+stopifnot(
+  "Analytic data is not strict 1:4 — check the cluster filter in 01_data_source_file.R" = final_control ==
+    final_hpa * 4
+)
+```
+
+
+# Exclusion cascade: matched cohort → analytic data set
+```{r}
+# Stage 1: the matched cohort produced by 10_propensity_score_matching.qmd
+combined_matched_data <- read_csv(
+  here::here("..", "data", "combined_matched_data.csv")
+)
+
+stage_matched <- combined_matched_data |>
+  distinct(LopNr, .keep_all = TRUE) |>
+  mutate(
+    arm = if_else(
+      treated == 1 | treated == "1" | treated == "HPA",
+      "HPA",
+      "Control"
+    )
+  ) |>
+  count(arm, name = "n_matched")
+
+# Stage 2: individuals carried into the register extract / CVD analytic file
+stage_cvd_source <- read_csv(
+  here::here("..", "data", "df_paper_3_CVD_2025-03-05.csv")
+) |>
+  mutate(
+    arm = if_else(
+      treated == 1 | treated == "1" | treated == "HPA",
+      "HPA",
+      "Control"
+    )
+  ) |>
+  count(arm, name = "n_cvd_source")
+
+# Stage 3: final analytic data set (data_cvd, after all recoding/joins in 01_)
+stage_final <- data_cvd |>
+  rename(arm = treated) |>
+  count(arm, name = "n_final")
+
+# assemble the cascade side by side so the drop at each stage is explicit
+cohort_flow <- stage_matched |>
+  full_join(stage_cvd_source, by = "arm") |>
+  full_join(stage_final, by = "arm") |>
+  mutate(
+    dropped_matched_to_source = n_matched - n_cvd_source,
+    dropped_source_to_final = n_cvd_source - n_final
+  )
+
+cohort_flow
+```
+
+
+# Emit the single source-of-truth N
+```{r}
+# one tidy file the manuscript / tables / title all read from
+cohort_flow_out <- bind_rows(
+  cohort_flow |>
+    select(arm, n_matched, n_cvd_source, n_final),
+  tibble(
+    arm = "TOTAL",
+    n_matched = sum(cohort_flow$n_matched, na.rm = TRUE),
+    n_cvd_source = sum(cohort_flow$n_cvd_source, na.rm = TRUE),
+    n_final = sum(cohort_flow$n_final, na.rm = TRUE)
+  )
+)
+
+cohort_flow_out
+
+write_csv(
+  cohort_flow_out,
+  here::here("..", "results", "tables", "cohort_flow.csv")
+)
+
+# headline numbers for the manuscript/title — read these, do not hand-type them
+cat(sprintf(
+  "FINAL N (analytic): HPA = %s, Controls = %s, Total = %s\n",
+  format(final_hpa, big.mark = ","),
+  format(final_control, big.mark = ","),
+  format(final_hpa + final_control, big.mark = ",")
+))
+```

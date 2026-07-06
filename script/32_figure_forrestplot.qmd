@@ -118,10 +118,10 @@ df_forrest_plot <- df_forrest_plot |>
   mutate(
     label = case_when(
       label == "M1: birth cohort" ~ "M1: birth cohort",
-      label == "M2: + age, sex, comorbidity & CVD" ~ "M2: + age, sex, prior comorbidity, prior CVD",
+      label == "M2: + age, sex, comorbidity & CVD" ~ "M2: + age, sex, comorbidity, prior CVD",
       label == "M3: + income" ~ "Age, sex, birth cohort,  \ncomorbidity, prior CVD & income",
-      label == "M4: + occupation" ~ "M4: + occupation",
-      label == "M5: + municipality & origin" ~ "M5: + municipality of recidence, country of origin",
+      label == "M4: + occupation" ~ "M4: + income, occupation",
+      label == "M5: + municipality & origin" ~ "M5: + municipality, origin",
       
       label == "HPA, 1 test" ~ "1 assessment",
       label == "HPA, 2 tests" ~ "2 assessments",
@@ -157,10 +157,10 @@ df_forrest_plot <- df_forrest_plot |>
       levels = c(
         # Main models
         "M1: birth cohort",
-        "M2: + age, sex, prior comorbidity, prior CVD",
+        "M2: + age, sex, comorbidity, prior CVD",
         "Age, sex, birth cohort,  \ncomorbidity, prior CVD & income",
-        "M4: + occupation",
-        "M5: + municipality of recidence, country of origin",
+        "M4: + income, occupation",
+        "M5: + municipality, origin",
 
         # Number of tests
         "≥3 assessments",
@@ -231,7 +231,7 @@ df_forrest_plot <- df_forrest_plot |>
     #  Exploratory   : the adjustment ladder (M1,M2,M4,M5), socioeconomic/occupation
     #                  effect modification, number of HPAs, and lifestyle bias probes
     block = case_when(
-      exposure == "m3" ~ "Primary model",
+      exposure == "m3" ~ "Primary model (M3)",
       exposure %in% c("m1", "m2", "m4", "m5") ~ "Adjustment sets",
       exposure %in% c("m6", "m7", "m10") ~ "Effect modification",
       label %in% c("Sex", "Age group", "Education") ~ "Effect modification",
@@ -244,14 +244,14 @@ df_forrest_plot <- df_forrest_plot |>
 
     # top-level tier used to split / label the figures
     tier = if_else(
-      block %in% c("Primary model", "Effect modification"),
+      block %in% c("Primary model (M3)", "Effect modification"),
       "Pre-specified", "Exploratory"
     ),
 
     block = factor(
       block,
       levels = c(
-        "Primary model",
+        "Primary model (M3)",
         "Effect modification",
         "Adjustment sets",
         "Socioeconomic",

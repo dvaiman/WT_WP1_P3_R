@@ -28,7 +28,7 @@ source(here::here("script", "01_data_source_file.R"))
 tbl_1 <- tbl_summary(
   data_cvd |>
     mutate(
-      treated = if_else(treated == "HPA", "HPA, overall", treated),
+      treated = if_else(treated == "HPA", "HPA participants", treated),
       SSYK = if_else(SSYK == "Military", NA, SSYK),
       SSYK = fct_drop(SSYK, only = "Military"),
       comorbidity = if_else(comorbidity == "=>3", "≥3", comorbidity),
@@ -41,50 +41,33 @@ tbl_1 <- tbl_summary(
     all_categorical() ~ "{n} ({p}%)"
   ),
   include = c(
-    Age,
+    # matches the manuscript Table 1 rows and order (Age + risk-time omitted)
     Sex,
     Place_of_origin,
     Civil_status,
     EducationLevel,
-
-    # SSYK,
     SSYK,
     IncomeLevel_CSFVI,
     KommunSize,
     comorbidity,
     cvd_art_before_HPA_flag,
     risk_art_flag_10yrs,
-    risk_art_flag_unrestricted,
-    risk_time_art_10yrs,
-    risk_time_art_unrestricted,
-
-    # Income_Sources_Category,
-    # Turnover_Rate_Category,
-    # Number_of_employees_Category,
-    # Operating_Profit_Margin_Category
+    risk_art_flag_unrestricted
   ),
   by = treated, # split table by group., n_tests_within_5_fac
   missing = "ifany", # list missing data if any
   label = list(
     Sex = "Sex",
     Place_of_origin ~ "Place of origin",
-    # n_tests_within_5_fac ~ "Number of tests within 5 years",
-    cvd_art_before_HPA_flag ~ "CVD (before HPA)",
-    risk_art_flag_10yrs ~ "CVD (Within ten years)",
-    risk_art_flag_unrestricted ~ "CVD (Unrestricted)",
-    risk_time_art_10yrs ~ "Ten year risk time (years)",
-    risk_time_art_unrestricted ~ "Unrestricted risk time (years)",
-    KommunSize ~ "Municipality",
+    cvd_art_before_HPA_flag ~ "CVD incidence (before HPA)",
+    risk_art_flag_10yrs ~ "CVD incidence (Within ten years)",
+    risk_art_flag_unrestricted ~ "CVD incidence (Unrestricted)",
+    KommunSize ~ "Municipality of residence",
     Civil_status ~ "Civil status",
     EducationLevel ~ "Education level",
     SSYK ~ "Occupation (since 2001)",
-    #SSYK ~ "Occupation",
-    comorbidity ~ "Weighted comorbidity index score",
+    comorbidity ~ "Charlson comorbidity index score",
     IncomeLevel_CSFVI ~ "Income (Percentage of median)"
-    # Income_Sources_Category ~ "Income sources",
-    # Turnover_Rate_Category ~ "Staff turnover",
-    # Number_of_employees_Category ~ "Number of employees",
-    # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
   )
 ) |>
   bold_labels()
@@ -100,7 +83,8 @@ tbl_2 <- tbl_summary(
     mutate(
       n_tests_within_5_fac = factor(
         n_tests_within_5_fac,
-        levels = c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests")
+        levels = c("HPA, 1 test", "HPA, 2 tests", "HPA, ≥3 tests"),
+        labels = c("1 HPA", "2 HPAs", "≥3 HPAs")
       ),
       SSYK = if_else(SSYK == "Military", NA, SSYK),
       SSYK = fct_drop(SSYK, only = "Military"),
@@ -114,50 +98,33 @@ tbl_2 <- tbl_summary(
     all_categorical() ~ "{n} ({p}%)"
   ),
   include = c(
-    Age,
+    # matches the manuscript Table 1 rows and order (Age + risk-time omitted)
     Sex,
     Place_of_origin,
     Civil_status,
     EducationLevel,
-
-    # SSYK,
     SSYK,
     IncomeLevel_CSFVI,
     KommunSize,
     comorbidity,
     cvd_art_before_HPA_flag,
     risk_art_flag_10yrs,
-    risk_art_flag_unrestricted,
-    risk_time_art_10yrs,
-    risk_time_art_unrestricted,
-
-    # Income_Sources_Category,
-    # Turnover_Rate_Category,
-    # Number_of_employees_Category,
-    # Operating_Profit_Margin_Category
+    risk_art_flag_unrestricted
   ),
   by = n_tests_within_5_fac, # split table by group., n_tests_within_5_fac
   missing = "ifany", # list missing data if any
   label = list(
     Sex = "Sex",
     Place_of_origin ~ "Place of origin",
-    # n_tests_within_5_fac ~ "Number of tests within 5 years",
-    cvd_art_before_HPA_flag ~ "CVD (before HPA)",
-    risk_art_flag_10yrs ~ "CVD (Within ten years)",
-    risk_art_flag_unrestricted ~ "CVD (Unrestricted)",
-    risk_time_art_10yrs ~ "Ten year risk time (years)",
-    risk_time_art_unrestricted ~ "Unrestricted risk time (years)",
-    KommunSize ~ "Municipality",
+    cvd_art_before_HPA_flag ~ "CVD incidence (before HPA)",
+    risk_art_flag_10yrs ~ "CVD incidence (Within ten years)",
+    risk_art_flag_unrestricted ~ "CVD incidence (Unrestricted)",
+    KommunSize ~ "Municipality of residence",
     Civil_status ~ "Civil status",
     EducationLevel ~ "Education level",
     SSYK ~ "Occupation (since 2001)",
-    #SSYK ~ "Occupation",
-    comorbidity ~ "Weighted comorbidity index score",
+    comorbidity ~ "Charlson comorbidity index score",
     IncomeLevel_CSFVI ~ "Income (Percentage of median)"
-    # Income_Sources_Category ~ "Income sources",
-    # Turnover_Rate_Category ~ "Staff turnover",
-    # Number_of_employees_Category ~ "Number of employees",
-    # Operating_Profit_Margin_Category ~ "Operating profit margin, private sector"
   )
 ) |>
   bold_labels()
@@ -169,7 +136,7 @@ tbl_merge_ex1 <-
     tbls = list(tbl_1, tbl_2),
     tab_spanner = c(
       "**Main comparison**",
-      "**Stratified on number of HPAs within 5-years**"
+      "**Baseline characteristics (first HPA) for participants stratified on number of HPAs within 5-years**"
     )
   ) |>
   as_gt() |>
@@ -185,8 +152,6 @@ tbl_merge_ex1
 
 
 ```{r}
-#| eval: false
-
 gtsave(tbl_merge_ex1, here::here("..", "results", "tables", "table_1.docx"))
 ```
 

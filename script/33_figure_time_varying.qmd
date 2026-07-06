@@ -62,6 +62,11 @@ hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
     mutate(
       Model = model_name,
       Subgroup = case_when(
+        # key the HPA-count curves on the model NAME (robust; the exact ≥ glyph
+        # in the contrast string fails to match, which was dropping ≥3 tests)
+        Model == "HPA_1_test" ~ "HPA, 1 test",
+        Model == "HPA_2_tests" ~ "HPA, 2 tests",
+        Model == "HPA_3_tests" ~ "HPA, ≥3 tests",
         contrast == "treated=HPA vs treated=Control" ~ "Overall",
         contrast ==
           "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 1 test vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 1 test" ~
@@ -108,6 +113,7 @@ hr_table <- imap_dfr(hr_models, function(fit_obj, model_name) {
         TRUE ~ NA_character_
       ),
       Group = case_when(
+        Model %in% c("HPA_1_test", "HPA_2_tests", "HPA_3_tests") ~ "HPA count",
         contrast == "treated=HPA vs treated=Control" ~ "Overall",
         contrast ==
           "treated=HPA, n_tests_within_5_fac_vs_ctrl=HPA, 1 test vs treated=Control, n_tests_within_5_fac_vs_ctrl=HPA, 1 test" ~
@@ -182,9 +188,11 @@ hr_table  |>
 library(showtext)
 library(sysfonts)
 
-# Add Google Font
-font_add_google("Roboto", "roboto")
-showtext_auto()
+# Use the system default font (via systemfonts), which has the ≥ and – glyphs
+# used in the labels. We avoid showtext + Google Fonts: the showtext-registered
+# Roboto is missing those glyphs (they render as "…") and it needs internet.
+showtext::showtext_auto(FALSE)
+plot_family <- ""   # "" = graphics-device / systemfonts default
 pal <- c(
   "Overall" = "#418286",
   "HPA, 1 test" = "#418286",
@@ -215,110 +223,101 @@ hr_table |>
     caption = ""
   )
 
-## 1. label positions: one row per subgroup, ranked by HR at 3 y -----
-label_df <- hr_table |>
-  filter(Group != "Occupation") |>
-  mutate(Group = factor(Group, c("Overall", "HPA count", "Sex", "Age grp"))) |>
-  group_by(Group, Subgroup) |>
-  slice_min(abs(time - 1095), n = 1) |> # HR closest to 3 y
-  ungroup() |>
-  group_by(Group) |>
-  arrange(ratio) |> # highest HR at top
-  mutate(
-    x = label_x,
-    y = 1.05 + 0.06 * (row_number() - 1) # vertical stacking
-  ) |>
-  ungroup()
+## build the HR-over-time plot for a chosen set of Groups -------------------
+# show_strip: FALSE for the single-panel main figure; TRUE for the supplementary
+# so its panels are labelled (HPA count / Sex / Age grp).
+build_hr_plot <- function(groups, ncol = NULL, show_strip = FALSE,
+                          ylim_range = c(0.5, 1.2), ybreaks = waiver()) {
+  dat <- hr_table |>
+    filter(Group %in% groups) |>
+    mutate(Group = factor(Group, levels = c("Overall", "HPA count", "Sex", "Age grp")))
 
-## ---- main figure -------------------------------------------------------
-hr_table |>
-  filter(Group != "Occupation") |>
-  mutate(Group = factor(Group, c("Overall", "HPA count", "Sex", "Age grp"))) |>
-  ggplot(aes(x = time, y = ratio)) +
+  # direct labels: HR closest to 3 y, stacked vertically within each panel
+  label_df <- dat |>
+    group_by(Group, Subgroup) |>
+    slice_min(abs(time - 1095), n = 1) |>
+    ungroup() |>
+    group_by(Group) |>
+    arrange(ratio) |>
+    mutate(x = label_x, y = 1.05 + 0.06 * (row_number() - 1)) |>
+    ungroup() |>
+    # ASCII display label (≥ and – render as "…" in some device/font combos);
+    # colour still keys on the original Subgroup so the palette matches.
+    mutate(lbl = str_replace_all(str_replace_all(Subgroup, "≥", ">="), "–", "-"))
 
-  ## reference lines
-  geom_vline(
-    xintercept = c(365, 3653),
-    linetype = "dashed",
-    colour = "grey65",
-    linewidth = .25
-  ) +
-  geom_hline(yintercept = 1, linetype = "dashed", color = "grey30") +
+  dat |>
+    ggplot(aes(x = time, y = ratio)) +
+    geom_vline(xintercept = c(365, 3653), linetype = "dashed", colour = "grey65", linewidth = .25) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "grey30") +
+    geom_ribbon(aes(ymin = ratio_lci, ymax = ratio_uci, group = factor(Subgroup)),
+                fill = "grey30", alpha = 0.1) +
+    geom_line(aes(colour = factor(Subgroup)), linewidth = .6) +
+    geom_text(data = label_df, aes(x = x, y = y, label = lbl, colour = Subgroup),
+              family = plot_family, hjust = 0, size = 3.5, show.legend = FALSE) +
+    coord_cartesian(ylim = ylim_range) +
+    scale_colour_manual(values = pal, breaks = names(pal)) +
+    # (no scale_fill_manual: the ribbon uses a fixed grey fill, not a mapped one)
+    scale_y_log10(breaks = ybreaks, labels = scales::label_comma(), name = " Hazard ratio (95% CI)") +
+    scale_x_log10(
+      position = "top",
+      name = expression("Time from first HPA (axis on " * log[10] * " scale)"),
+      breaks = breaks_days, labels = labels
+    ) +
+    facet_wrap(~Group, ncol = ncol) +
+    labs(caption = "All estimates compare HPAs to their controls (reference)",
+         x = NULL, y = "hazard ratio", color = NULL, fill = NULL) +
+    theme_minimal(base_size = 11, base_family = plot_family) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text = element_text(color = "grey30", size = 10),
+      axis.title = element_text(color = "grey40", size = 11),
+      legend.position = "none",
+      strip.text = if (show_strip) element_text(face = "bold", size = 10) else element_blank(),
+      plot.title = element_text(hjust = 0.5)
+    )
+}
 
-  ## curves + ribbons
-  geom_ribbon(
-    aes(ymin = ratio_lci, ymax = ratio_uci, group = factor(Subgroup)),
-    fill = "grey30",
-    alpha = 0.1
-  ) +
-  geom_line(aes(colour = factor(Subgroup)), linewidth = .6) +
+# MAIN figure — overall estimate only (single panel). y-axis cut at 0.65 (the
+# overall curve sits ~0.75–1.0, so lower space was empty) with extra breaks.
+p_hr_main <- build_hr_plot(
+  "Overall", show_strip = FALSE,
+  ylim_range = c(0.65, 1.2),
+  ybreaks = c(0.7, 0.8, 0.9, 1.0, 1.1)
+)
+p_hr_main
 
-  ## direct labels -------------------------------------------------------
-  geom_text(
-    data = label_df,
-    aes(x = x, y = y, label = Subgroup, colour = Subgroup),
-    family = "roboto",
-    hjust = 0, # left-align text
-    size = 3.5,
-    show.legend = FALSE
-  ) +
-
-  ## scales --------------------------------------------------------------
-  coord_cartesian(ylim = c(.5, 1.2)) +
-  scale_colour_manual(values = pal, breaks = names(pal)) +
-  scale_fill_manual(values = pal, breaks = names(pal)) +
-
-  scale_y_log10(
-    labels = scales::label_comma(),
-    name = " Hazard ratio (95% CI)"
-  ) +
-  scale_x_log10(
-    position = "top", # x-axis above panels
-    name = expression("Time from first HPA (axis on " * log[10] * " scale)"),
-    breaks = breaks_days,
-    labels = labels
-  ) +
-
-  facet_wrap(~Group) +
-  labs(caption = "All estimates compare HPAs to their controls (reference)") +
-  ## theme ---------------------------------------------------------------
-  theme_minimal(base_size = 11, base_family = "roboto") +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.text = element_text(color = "grey30", size = 10),
-    axis.title = element_text(color = "grey40", size = 11),
-    legend.position = "none",
-    legend.box = "horizontal",
-    legend.title = element_blank(),
-    legend.text = element_text(size = 8),
-    legend.key.size = unit(0.5, "cm"),
-    strip.text = element_blank(), # remove facet titles
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  labs(
-    x = NULL, # already set in scale_x_log10()
-    y = "hazard ratio",
-    color = NULL,
-    fill = NULL
-  )
+# SUPPLEMENTARY figure — subgroup panels (HPA count, sex, age group). Kept a wider
+# y-range because some subgroup curves (e.g. age 18–34, women) drop lower.
+p_hr_supp <- build_hr_plot(
+  c("HPA count", "Sex", "Age grp"), ncol = 3, show_strip = TRUE,
+  ylim_range = c(0.5, 1.2),
+  ybreaks = c(0.5, 0.7, 0.8, 0.9, 1.0)
+)
+p_hr_supp
 
 
 ```
 
 ```{r}
+# main figure — overall only (shorter: single wide panel reads better than tall)
 ggsave(
-  here::here("..", "results", "figures", "hazard_ratio_over_time_plot.pdf"),
-  width = 210,
-  height = 140,
-  units = "mm",
-  dpi = 300
+  here::here("..", "results", "figures", "hazard_ratio_over_time_main.pdf"),
+  plot = p_hr_main,
+  width = 140, height = 80, units = "mm", dpi = 300
 )
 
+# supplementary figure — subgroup panels (less high)
+ggsave(
+  here::here("..", "results", "figures", "hazard_ratio_over_time_supplementary.pdf"),
+  plot = p_hr_supp,
+  width = 210, height = 78, units = "mm", dpi = 300
+)
 ```
 
 ```{r}
 #| eval: false
+#| purl: false
 #|
 library(patchwork)
 hazard +
@@ -335,6 +334,7 @@ hazard +
 
 ```{r}
 #| eval: false
+#| purl: false
 #|
 rmst_wide <- rmst_table %>%
   pivot_wider(

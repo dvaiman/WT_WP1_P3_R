@@ -319,6 +319,15 @@ one tidy row each so the response letter can read every number from a single
 table.
 
 ```{r}
+# keep only complete 1:4 matched sets (drop clusters that lost a member to the
+# exclusion) so the sensitivity analyses preserve the matched design.
+keep_complete_1to4 <- function(data) {
+  data |>
+    group_by(id_cluster) |>
+    filter(sum(treated == "HPA") == 1, sum(treated == "Control") == 4) |>
+    ungroup()
+}
+
 # refit M3 on a (possibly filtered) data set and return one tidy HR row
 fit_m3_sens <- function(data, label) {
   fit <- coxph(
@@ -343,16 +352,16 @@ fit_m3_sens <- function(data, label) {
 }
 
 sens_m3 <- bind_rows(
-  # exclude anyone with CVD before their first HPA (referee 2.7)
+  # exclude anyone with CVD before their first HPA (referee 2.7), then keep only
+  # matched sets that are still complete 1:4 (i.e. sets with no prior-CVD member).
   fit_m3_sens(
-    data_cvd |> filter(cvd_art_before_HPA_flag == 0),
+    data_cvd |> filter(cvd_art_before_HPA_flag == 0) |> keep_complete_1to4(),
     "M3, excluding prior CVD"
   ),
-  # restrict to working ages 18–65 at first HPA (referee 2.13).
-  # NB: this drops some matched cluster members; we refit directly on the
-  # restricted set rather than re-matching.
+  # restrict to ages 18–65 at first HPA (referee 2.13), then keep complete 1:4
+  # sets (i.e. sets where every member is in range) so the matching is preserved.
   fit_m3_sens(
-    data_cvd |> filter(Age >= 18 & Age <= 65),
+    data_cvd |> filter(Age >= 18 & Age <= 65) |> keep_complete_1to4(),
     "M3, ages 18–65 at first HPA"
   )
 )

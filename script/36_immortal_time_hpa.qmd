@@ -1,0 +1,391 @@
+---
+title: ""
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    grid:
+      margin-width: 100px
+author: Daniel Väisänen
+editor: source
+toc: true
+execute:
+  warning: false
+  echo: true
+  eval: false
+---
+
+# Description
+
+Immortal-time-bias check for the **number of HPAs** dose–response.
+
+A participant cannot be in the "≥3 assessments" group without surviving long
+enough to accrue three assessments — so classifying assessment count at baseline
+(fixed) grants the higher-count groups "immortal" person-time and can spuriously
+make more assessments look protective. Here we re-estimate the association with
+**assessment count as a time-varying exposure** that increments at each
+assessment date (a person only enters the "≥3" state *after* their third
+assessment). We report the time-varying estimate next to the naïve
+baseline-classified estimate; the gap between them is the immortal-time inflation.
+
+**Estimand / control handling (Option A):** the 1:4 matched clusters are kept
+intact. HPA participants carry the **time-varying** assessment count; each control
+carries its matched participant's **baseline-assigned** category as a *constant*
+(as in the reported dose–response). Set `control_mode <- "zero"` for Option B
+(all controls fixed at the lowest category) if a different estimand is wanted.
+
+
+# Libraries
+```{r}
+library(tidyverse)
+library(survival)   # tmerge(), cumtdc(), coxph(), cox.zph()
+library(broom)
+```
+
+
+# Data
+```{r}
+source(here::here("script", "01_data_source_file.R"))
+source(here::here("script", "02_functions_source_file.R"))
+
+control_mode <- "baseline"   # "baseline" = Option A, "zero" = Option B
+```
+
+
+# 1. Every assessment date (raw HPA file)
+```{r}
+# The saved df_n_tests only kept first/second/last dates, so we read all
+# assessment dates from the raw cleaned HPA file (LopNr + Performed).
+raw_hpa_path <- here::here(
+  "..", "..", "..", "LE", "Data_och_analyser", "Data",
+  "EEB_hpb_clean_2023-10-16.csv"
+)
+stopifnot("raw HPA file not found — check the path" = file.exists(raw_hpa_path))
+
+all_assessments <- readr::read_csv(
+  raw_hpa_path,
+  col_select = c(LopNr, Performed),
+  show_col_types = FALSE
+) |>
+  mutate(Performed = as.Date(Performed)) |>
+  filter(!is.na(Performed)) |>
+  distinct(LopNr, Performed)
+```
+
+
+# 2. Time zero, follow-up, baseline category, assessment times
+```{r}
+# One row per person in the analytic cohort. Time zero is HPA_date (the survival
+# baseline that risk_time_art_10yrs is measured from). risk_time_art_10yrs is the
+# follow-up length in days; risk_art_flag_10yrs the event indicator.
+base <- data_cvd |>
+  transmute(
+    LopNr,
+    id_cluster,
+    treated,
+    time_zero = as.Date(HPA_date),
+    tstop     = as.numeric(risk_time_art_10yrs),
+    event     = as.integer(risk_art_flag_10yrs),
+    n_tests_within_5,
+    baseline_cat = n_tests_within_5_fac_vs_ctrl,   # controls carry the matched HPA's category (imputed in 01_)
+    Age, Sex, birth_cohort, comorbidity, cvd_art_before_HPA_flag, IncomeLevel_CSFVI
+  ) |>
+  # recode the baseline category to clean, shared levels
+  mutate(
+    baseline_cat = fct_recode(
+      baseline_cat,
+      "1 assessment"  = "HPA, 1 test",
+      "2 assessments" = "HPA, 2 tests",
+      "≥3 assessments" = "HPA, ≥3 tests"
+    ),
+    baseline_cat = factor(
+      baseline_cat,
+      levels = c("1 assessment", "2 assessments", "≥3 assessments")
+    )
+  ) |>
+  # tmerge requires strictly positive follow-up
+  filter(!is.na(tstop), tstop > 0, !is.na(event))
+
+# assessment times (days since time zero) for HPA participants, within the
+# 5-year window and AT OR AFTER time zero.
+assess_long <- base |>
+  filter(treated == "HPA") |>
+  select(LopNr, time_zero, tstop) |>
+  inner_join(all_assessments, by = "LopNr") |>
+  mutate(atime = as.numeric(Performed - time_zero)) |>          # days since time zero
+  filter(atime >= 0, atime <= 1826) |>                          # 5-year window (1826 days)
+  arrange(LopNr, atime)
+
+# sanity: assessment count from raw dates should track n_tests_within_5
+assess_counts <- assess_long |> count(LopNr, name = "n_assess_raw")
+base |>
+  filter(treated == "HPA") |>
+  left_join(assess_counts, by = "LopNr") |>
+  mutate(n_assess_raw = replace_na(n_assess_raw, 0L)) |>
+  summarise(
+    mean_saved = mean(n_tests_within_5, na.rm = TRUE),
+    mean_raw   = mean(n_assess_raw),
+    agree_pct  = mean(n_tests_within_5 == n_assess_raw, na.rm = TRUE) * 100
+  )
+```
+
+
+# 3. Data check 1 — no assessment before time zero
+```{r}
+# Any negative atime would silently break the tmerge split. We already filtered
+# atime >= 0 above; here we confirm none were dropped for being pre-baseline.
+pre_baseline <- base |>
+  filter(treated == "HPA") |>
+  select(LopNr, time_zero) |>
+  inner_join(all_assessments, by = "LopNr") |>
+  filter(as.numeric(Performed - time_zero) < 0,
+         as.numeric(Performed - time_zero) >= -1826)   # within window but before t0
+
+cat("Assessments dated before time zero (dropped):", nrow(pre_baseline), "\n")
+```
+
+
+# 4. Counting-process dataset via tmerge (time-varying n_hpa)
+```{r}
+# Post-baseline assessments only (the first assessment is time zero → baseline
+# count of 1). Keep those strictly inside follow-up so no split lands on/after tstop.
+assess_increments <- assess_long |>
+  filter(atime > 0, atime < tstop) |>
+  select(LopNr, atime)
+
+# cvd = event() sets the terminal interval; cumtdc() counts post-baseline
+# assessments accrued so far.
+cp <- tmerge(base, base, id = LopNr, cvd = event(tstop, event))
+cp <- tmerge(cp, assess_increments, id = LopNr, n_post = cumtdc(atime))
+
+cp <- cp |>
+  mutate(
+    n_post = replace_na(as.integer(n_post), 0L),
+    # baseline count is 1; each post-baseline assessment adds 1; cap at 3
+    n_hpa_count = pmin(1L + n_post, 3L),
+    n_hpa_tv = if (control_mode == "zero") {
+      # Option B: controls fixed at the lowest category
+      factor(
+        case_when(
+          treated == "Control" ~ "1 assessment",
+          n_hpa_count == 1 ~ "1 assessment",
+          n_hpa_count == 2 ~ "2 assessments",
+          n_hpa_count >= 3 ~ "≥3 assessments"
+        ),
+        levels = c("1 assessment", "2 assessments", "≥3 assessments")
+      )
+    } else {
+      # Option A: controls carry their matched baseline category (constant)
+      factor(
+        case_when(
+          treated == "Control" ~ as.character(baseline_cat),
+          n_hpa_count == 1 ~ "1 assessment",
+          n_hpa_count == 2 ~ "2 assessments",
+          n_hpa_count >= 3 ~ "≥3 assessments"
+        ),
+        levels = c("1 assessment", "2 assessments", "≥3 assessments")
+      )
+    }
+  )
+```
+
+
+# 5. Data check 2 — events and person-time preserved after splitting
+```{r}
+checks <- tibble(
+  events_before      = sum(base$event),
+  events_after       = sum(cp$cvd),
+  events_ok          = sum(base$event) == sum(cp$cvd),
+  persontime_before  = sum(base$tstop),
+  persontime_after   = sum(cp$tstop - cp$tstart),
+  # allow a tiny numeric tolerance
+  persontime_ok      = abs(sum(base$tstop) - sum(cp$tstop - cp$tstart)) < 1,
+  bad_intervals      = sum(cp$tstop <= cp$tstart),   # must be 0
+  any_na_interval    = any(is.na(cp$tstart) | is.na(cp$tstop))
+)
+checks
+
+stopifnot(
+  "events lost/duplicated at split boundaries" = checks$events_ok,
+  "person-time not preserved after splitting"  = checks$persontime_ok,
+  "invalid (tstop <= tstart) intervals present" = checks$bad_intervals == 0
+)
+```
+
+
+# 6. Estimate: naïve vs time-varying assessment count
+
+The **HPA-only** contrast is the primary analysis: the immortal time lives entirely
+within the HPA arm (you cannot be "≥3 assessments" without surviving to accrue
+three), so restricting to HPA participants with "1 assessment" as the reference
+isolates the bias most cleanly. The **matched 1:4** version is reported as a
+secondary estimand (Option A); because each control inherits its matched
+participant's category, its coefficients are near-null and less informative for the
+dose–response question.
+
+```{r}
+cov_rhs <- "Age + Sex + birth_cohort + comorbidity + cvd_art_before_HPA_flag + IncomeLevel_CSFVI"
+
+tidy_hr <- function(fit, which, panel) {
+  broom::tidy(fit, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(str_detect(term, "assessment")) |>
+    transmute(
+      panel, model = which,
+      term = str_remove(term, "^(baseline_cat|n_hpa_tv)"),
+      estimate, conf.low, conf.high, p.value
+    )
+}
+
+## PRIMARY — HPA participants only -----------------------------------------
+base_hpa <- base |> filter(treated == "HPA")
+cp_hpa   <- cp   |> filter(treated == "HPA")
+
+# NAÏVE: assessment count fixed at baseline (the reported dose–response; this is
+# the estimate that immortal time inflates).
+fit_naive_hpa <- coxph(
+  as.formula(paste("Surv(tstop, event) ~ baseline_cat +", cov_rhs)),
+  data = base_hpa
+)
+# TIME-VARYING: count increments over follow-up (immortal time removed).
+fit_tv_hpa <- coxph(
+  as.formula(paste("Surv(tstart, tstop, cvd) ~ n_hpa_tv +", cov_rhs)),
+  data = cp_hpa
+)
+
+## SECONDARY — matched 1:4 (Option A), clusters intact ---------------------
+fit_naive_matched <- coxph(
+  as.formula(paste("Surv(tstop, event) ~ baseline_cat +", cov_rhs)),
+  data = base, cluster = id_cluster
+)
+fit_tv_matched <- coxph(
+  as.formula(paste("Surv(tstart, tstop, cvd) ~ n_hpa_tv +", cov_rhs)),
+  data = cp, cluster = id_cluster
+)
+
+comparison <- bind_rows(
+  tidy_hr(fit_naive_hpa,     "Naïve (baseline count)",   "HPA-only (primary)"),
+  tidy_hr(fit_tv_hpa,        "Time-varying (corrected)", "HPA-only (primary)"),
+  tidy_hr(fit_naive_matched, "Naïve (baseline count)",   "Matched 1:4 (secondary)"),
+  tidy_hr(fit_tv_matched,    "Time-varying (corrected)", "Matched 1:4 (secondary)")
+) |>
+  mutate(`HR (95% CI)` = sprintf("%.2f (%.2f–%.2f)", estimate, conf.low, conf.high))
+
+comparison |> arrange(panel, term, model) |> print(n = 50)
+
+write_csv(
+  comparison,
+  here::here("..", "results", "tables", "immortal_time_ntests_comparison.csv")
+)
+```
+
+
+# 7. Proportional-hazards test (HPA-only time-varying term)
+```{r}
+# Table only. The Schoenfeld residual plot is one point per event (tens of
+# thousands): hard to read and memory-heavy in a batch run, so it is omitted.
+# A non-significant global p means PH holds and the constant-HR summary is
+# adequate; a significant p for the ≥3 term would itself indicate WHEN the
+# count/CVD divergence emerges.
+zph_hpa <- cox.zph(fit_tv_hpa)
+zph_hpa
+```
+
+
+# 8. Printable report + manuscript summary
+```{r}
+# headline contrast: ≥3 vs 1 assessment, HPA participants
+row_naive <- comparison |>
+  filter(
+    panel == "HPA-only (primary)",
+    term == "≥3 assessments",
+    str_detect(model, "Naïve")
+  )
+row_tv <- comparison |>
+  filter(
+    panel == "HPA-only (primary)",
+    term == "≥3 assessments",
+    str_detect(model, "Time-varying")
+  )
+
+pct_removed <- (log(row_naive$estimate) - log(row_tv$estimate)) /
+  log(row_naive$estimate) *
+  100
+tv_sig <- row_tv$conf.low > 1 | row_tv$conf.high < 1
+global_p <- tryCatch(zph_hpa$table["GLOBAL", "p"], error = function(e) NA_real_)
+
+# side-by-side markdown table: naïve vs time-varying, HPA participants (ref = 1)
+hr_str <- function(term_val, model_pat) {
+  r <- comparison |>
+    filter(
+      panel == "HPA-only (primary)",
+      term == term_val,
+      str_detect(model, model_pat)
+    )
+  if (nrow(r) == 0) "—" else r$`HR (95% CI)`[1]
+}
+result_tbl <- c(
+  "| Number of HPAs (vs 1 assessment) | Naïve HR (95% CI) | Time-varying HR (95% CI) |",
+  "|---|---|---|",
+  sprintf(
+    "| ≥3 assessments | %s | %s |",
+    hr_str("≥3 assessments", "Naïve"),
+    hr_str("≥3 assessments", "Time-varying")
+  ),
+  sprintf(
+    "| 2 assessments | %s | %s |",
+    hr_str("2 assessments", "Naïve"),
+    hr_str("2 assessments", "Time-varying")
+  )
+)
+
+md <- c(
+  "# Immortal-time-bias check — number of HPAs",
+  "",
+  "## What was done",
+  "The number of HPAs within 5 years (1, 2, ≥3) was re-estimated as a **time-varying**",
+  "exposure with a counting-process Cox model (`survival::tmerge` + `cumtdc`): a",
+  "participant enters the '≥3' state only *after* their third assessment date, so the",
+  "person-time accrued before that is no longer credited to the higher-count group.",
+  "This removes immortal-time bias. Primary analysis: HPA participants only,",
+  "'1 assessment' as reference, adjusted for the primary-model (M3) covariates.",
+  "",
+  "## Results (HPA participants, reference = 1 assessment)",
+  "",
+  result_tbl,
+  "",
+  "## Headline result — ≥3 vs 1 assessment (HPA participants)",
+  sprintf(
+    "- Naïve (count fixed at baseline): **%s**, p = %.3g",
+    row_naive$`HR (95% CI)`,
+    row_naive$p.value
+  ),
+  sprintf(
+    "- Time-varying (immortal-time corrected): **%s**, p = %.3g",
+    row_tv$`HR (95% CI)`,
+    row_tv$p.value
+  ),
+  sprintf(
+    "- Immortal time accounted for ~%.0f%% of the apparent (log-scale) association; the corrected estimate is %s significant at p < 0.05.",
+    pct_removed,
+    if (tv_sig) "still" else "no longer"
+  ),
+  sprintf(
+    "- Proportional-hazards test (time-varying term): global p = %.3g.",
+    global_p
+  ),
+  "",
+  "## Interpretation",
+  "Correcting for immortal time attenuates the apparent protective dose–response of",
+  "more assessments. Removing immortal time does **not** remove confounding —",
+  "participants who return for more assessments may be healthier or more",
+  "health-conscious — so the residual association cannot be interpreted causally.",
+  "This supports treating the number-of-HPAs analysis as exploratory rather than as",
+  "evidence of a causal dose–response."
+)
+
+writeLines(md)
+writeLines(
+  md,
+  here::here("..", "results", "tables", "immortal_time_report.md.md")
+)
+```
