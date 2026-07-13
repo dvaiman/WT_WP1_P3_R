@@ -374,7 +374,9 @@ joined2 <-
     admin_censor = as.Date("2024-06-05"),
 
     censor_date_1y = pmin(
-      risk_start_1y + years(10), # ≤10 y of follow-up
+      HPA_date + days(3652), # cap at 10 y from the HPA (SAME as censor_date_10yrs),
+      # NOT risk_start_1y + years(10), which is 11 y from the HPA and adds a year
+      # of follow-up — a wash-out must stay inside the primary's 10-year window.
       DODSDAT,
       admin_censor,
       na.rm = TRUE

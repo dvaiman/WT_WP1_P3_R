@@ -145,6 +145,79 @@ cat("Assessments dated before time zero (dropped):", nrow(pre_baseline), "\n")
 ```
 
 
+# 3b. Event timing relative to later assessments (immortal time made concrete)
+
+How often did a participant's CVD event occur **before** the assessment that
+defines their higher baseline count? Those are exactly the events the
+baseline-classified ("naïve") model credits to the higher-count group but the
+time-varying model reattributes to the lower count — the immortal time, counted
+directly. (Incident CVD here is mostly non-fatal, so a participant can have an
+event and then return for a later assessment.)
+
+```{r}
+# rank each HPA participant's assessments: 1 = baseline HPA (atime ~0), 2 = second, 3 = third
+assess_ranked <- assess_long |>
+  arrange(LopNr, atime) |>
+  mutate(assess_no = row_number(), .by = LopNr)
+
+# second / third assessment times (days since time zero), one row per person
+assess_wide <- assess_ranked |>
+  filter(assess_no %in% c(2, 3)) |>
+  select(LopNr, assess_no, atime) |>
+  tidyr::pivot_wider(
+    names_from = assess_no, values_from = atime, names_prefix = "t_assess_"
+  )
+
+# join each HPA participant's event time to their 2nd/3rd assessment times
+hpa_events <- base |>
+  filter(treated == "HPA") |>
+  select(LopNr, tstop, event) |>
+  left_join(assess_wide, by = "LopNr")
+
+# denominators are people who actually reached 2 (3) assessments within 5 years
+among_2 <- hpa_events |> filter(!is.na(t_assess_2))
+among_3 <- hpa_events |> filter(!is.na(t_assess_3))
+
+event_timing <- tibble(
+  group = c("Reached 2 assessments", "Reached 3 assessments"),
+  n = c(nrow(among_2), nrow(among_3)),
+  cvd_events = c(sum(among_2$event), sum(among_3$event)),
+  # events occurring before the 2nd / 3rd assessment date
+  cvd_before_that_assessment = c(
+    sum(among_2$event == 1 & among_2$tstop < among_2$t_assess_2),
+    sum(among_3$event == 1 & among_3$tstop < among_3$t_assess_3)
+  )
+) |>
+  mutate(
+    pct_of_events = round(100 * cvd_before_that_assessment / cvd_events, 1),
+    pct_of_people = round(100 * cvd_before_that_assessment / n, 2)
+  )
+
+print(event_timing)
+
+write_csv(
+  event_timing,
+  here::here("..", "results", "tables", "immortal_time_event_timing.csv")
+)
+
+# ready-to-paste Table S1 footnote, numbers filled straight from the counts above
+r3 <- event_timing |> filter(group == "Reached 3 assessments")
+footnote_s1 <- sprintf(
+  paste0(
+    "Of the %s CVD events among participants who completed three or more ",
+    "assessments within five years, %s (%.1f%%) occurred before the third ",
+    "assessment; the baseline-classified analysis credits these events to the ",
+    "≥3 group, whereas the time-varying analysis attributes them, and the ",
+    "person-time preceding each assessment, to the lower count."
+  ),
+  format(r3$cvd_events, big.mark = ","),
+  format(r3$cvd_before_that_assessment, big.mark = ","),
+  r3$pct_of_events
+)
+cat("\nTable S1 footnote:\n", footnote_s1, "\n")
+```
+
+
 # 4. Counting-process dataset via tmerge (time-varying n_hpa)
 ```{r}
 # Post-baseline assessments only (the first assessment is time zero → baseline

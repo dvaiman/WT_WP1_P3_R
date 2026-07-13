@@ -389,6 +389,174 @@ ggsave(
 ```
 
 
+# Main-manuscript version — Overall only (drops the HPA-count / subgroup facets)
+
+Single-panel version of the RMST-difference figure for the main manuscript: the
+overall HPA-vs-control contrast, without the number-of-assessments dose–response
+(exploratory / immortal-time-affected) or the other subgroups, which stay in the
+supplementary faceted figure above.
+
+The straight segments between 0, 5, 10 and 20 years are a **visual guide only** —
+only those four points are estimated (see note below). The height of the curve at
+each marker *is* the accumulated CVD-free time gained versus controls up to that
+horizon (the area between the two survival curves), so it is read off the y-axis,
+not from the shaded region.
+
+```{r}
+# Roboto for the labels/plot (registered once; showtext renders it to the device)
+if (!"roboto" %in% sysfonts::font_families()) {
+  sysfonts::font_add_google("Roboto", "roboto")
+}
+showtext::showtext_auto()
+
+overall_line <- rmst_line_data0 |>
+  filter(Subgroup == "Overall") |>
+  arrange(time_years)
+
+overall_pts <- overall_line |> filter(time_years > 0) # estimated 5/10/20-yr points
+
+p_overall <- ggplot(overall_line, aes(x = time_years, y = difference)) +
+  # light fill under the trajectory (decorative: conveys accumulation)
+  geom_ribbon(aes(ymin = 0, ymax = difference), fill = "#418286", alpha = 0.12) +
+  # straight guide segments between the estimated points
+  geom_line(colour = "#418286", linewidth = 0.8) +
+  # 95% CI as a plain vertical line (no end caps), drawn before the point
+  geom_errorbar(
+    data = overall_pts,
+    aes(ymin = difference_lci, ymax = difference_uci),
+    width = 0, linewidth = 0.7, colour = "#418286"
+  ) +
+  geom_point(data = overall_pts, colour = "#418286", size = 2.6) +
+  # value labels sitting up and to the LEFT of each dot (right-aligned so the
+  # long CI text extends leftward, keeping it inside the panel)
+  geom_text(
+    data = overall_pts, aes(label = ΔRMST),
+    hjust = 1, vjust = 0, nudge_x = -0.4, nudge_y = 0.5,
+    size = 3, colour = "grey20", family = "roboto"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 21),
+    breaks = c(0, 5, 10, 20),
+    labels = c("0 years\nfrom first\nHPA", "5", "10", "20")
+  ) +
+  scale_y_continuous(
+    name = "RMST difference (days), HPA vs controls",
+    expand = expansion(mult = c(0, .08)),
+    sec.axis = sec_axis(
+      trans = ~ . * 1000 / 365.25,
+      name = "RMST difference (years / 1,000 persons)"
+    )
+  ) +
+  labs(x = NULL) +
+  theme_minimal(base_size = 11, base_family = "roboto") +
+  theme(
+    text = element_text(family = "roboto"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    axis.title = element_text(colour = "grey35")
+  )
+
+p_overall
+
+ggsave(
+  here::here("..", "results", "figures", "rmstd_overall_main.pdf"),
+  p_overall,
+  width = 130, height = 95, units = "mm"
+)
+```
+
+
+# Figure 3 — three-facet version (total population, sex, age groups)
+
+```{r}
+# RMST difference across the three panels wanted for the main text: Overall
+# (total population), Sex, and Age group. Drops the HPA-count facet.
+if (!"roboto" %in% sysfonts::font_families()) {
+  sysfonts::font_add_google("Roboto", "roboto")
+}
+showtext::showtext_auto()
+
+rmst_3facet <- rmst_line_data0 |>
+  filter(groups %in% c("Overall", "Sex", "Age group")) |>
+  mutate(groups = factor(groups, levels = c("Overall", "Sex", "Age group")))
+
+pts <- rmst_3facet |> filter(time_years > 0)
+
+# short, ASCII-safe direct labels at 20 y, to the right of each area (panels have
+# no strip headers, so the labels identify the curves — as in the area plot)
+lab20 <- rmst_3facet |>
+  filter(time_years == 20) |>
+  mutate(lbl = Subgroup |>
+    str_remove("Age grp ") |>
+    str_replace_all("≥", ">=") |>
+    str_replace_all("–", "-"))
+
+# opaque filled areas like the supplementary area plot. Subgroup is ordered by
+# descending difference (in rmst_line_data0), so larger areas are drawn first /
+# behind and the smaller ones stay visible on top. Points + CIs are dodged
+# sideways so the 5/10/20-yr intervals no longer sit on top of each other.
+p_rmst_fig3 <- ggplot(
+  rmst_3facet,
+  aes(x = time_years, y = difference, group = Subgroup,
+      colour = Subgroup, fill = Subgroup)
+) +
+  # filled area is the base layer; the line traces its top edge
+  geom_ribbon(aes(ymin = 0, ymax = difference), alpha = 1, linewidth = 0) +
+  geom_line(linewidth = 0.5) +
+  geom_errorbar(
+    data = pts, aes(ymin = difference_lci, ymax = difference_uci),
+    position = position_dodge(width = 1.4),
+    width = 0, linewidth = 0.9, alpha = .85, colour = "grey10"
+  ) +
+  geom_point(
+    data = pts, position = position_dodge(width = 1.4),
+    colour = "grey10", size = 1.1
+  ) +
+  geom_text(
+    data = lab20, aes(label = lbl, colour = Subgroup),
+    position = position_nudge(x = 1.3), hjust = 0, size = 3,
+    family = "roboto", show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    position = "top", limits = c(0, 29),
+    breaks = c(0, 5, 10, 20),
+    labels = c("0 years\nfrom first\nHPA", "5", "10", "20")
+  ) +
+  scale_y_continuous(
+    name = "RMST difference (days), HPA vs controls",
+    expand = expansion(mult = c(0, .05)),
+    sec.axis = sec_axis(
+      trans = ~ . * 1000 / 365.25,
+      name = "RMST difference (years / 1,000 persons)"
+    )
+  ) +
+  scale_colour_manual(values = my_subgroup_cols) +
+  scale_fill_manual(values = my_subgroup_cols) +
+  facet_wrap(~groups, ncol = 3) +
+  labs(x = NULL,
+       caption = "Shaded area shows the accumulated CVD-free time gained vs controls") +
+  theme_minimal(base_size = 11, base_family = "roboto") +
+  theme(
+    text = element_text(family = "roboto"),
+    legend.position = "none",
+    axis.title = element_text(colour = "grey35"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.spacing = unit(1.2, "lines"),
+    strip.text = element_blank(),
+    strip.background = element_blank()
+  )
+
+p_rmst_fig3
+
+ggsave(
+  here::here("..", "results", "figures", "rmstd_3facet_main.pdf"),
+  p_rmst_fig3,
+  width = 210, height = 90, units = "mm"
+)
+```
+
+
 
 
 
@@ -570,11 +738,11 @@ df_plot <- data_clean |>
       "Sex",       "Men",
       "Sex",       "Women",
       "Age Group", "Age <35",
-      "Age Group", "Age 35-44",
+      "Age Group", "Age 35-49",
       "Age Group", "Age ≥50",
-      "HPA Count", "HPA 0",
-      "HPA Count", "HPA 1",
-      "HPA Count", "HPA 2+"
+      "HPA Count", "HPA, 1 test",
+      "HPA Count", "HPA, 2 tests",
+      "HPA Count", "HPA, ≥3 tests"
     ),
     by = c("category", "subgroup_clean" = "subgroup")
   ) |>
@@ -593,9 +761,10 @@ df_plot <- data_clean |>
 # ── 2. draw with rounded bars (geom_col_rounded) ────────────────────────
 ggplot(df_plot, aes(x = subgroup_clean, y = difference)) +
 
-  # rounded‐end bars (exact length = difference)
+  # rounded‐end bars (exact length = difference); radius is a 0–1 fraction in
+  # the installed ggrounded (NOT a grid::unit)
   geom_col_rounded(
-    radius = grid::unit(4, "pt"),
+    radius = 0.2,
     width  = 0.7,
     fill   = "grey80",
     colour = NA

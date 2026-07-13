@@ -43,8 +43,21 @@ source(here::here("script", "02_functions_source_file.R"))
 # 0. add start–stop variables + landmark bookkeeping
 # ─────────────────────────────────────────────────────────────
 
+# Define the one-year wash-out landmark as a STRICT SUBSET of the primary's own
+# 10-year outcome window, rather than trusting the tstart_1y/tstop_1y/event_post1y
+# baked in by script 13. Those used an 11-year cap (10 y measured *from the
+# landmark*), so they added a year of follow-up and produced MORE events than the
+# primary — impossible for a wash-out. Here we instead: enter at day 365, keep the
+# primary 10-year exit time and event, and drop anyone who left the cohort (event,
+# death or censoring) within the first year. This can only ever remove events
+# relative to the primary, which is what a delayed-entry landmark must do.
 data_cvd_sens <- data_cvd %>% # your full analytic file
-  filter(tstop_1y > tstart_1y) |> # only keep those with follow-up time > 0
+  mutate(
+    tstart_1y    = 365, # delayed entry: at risk only from 1 year after the HPA
+    tstop_1y     = risk_time_art_10yrs, # same 10-year-from-HPA exit as the primary
+    event_post1y = risk_art_flag_10yrs # same 10-year event; year-1 events dropped below
+  ) |>
+  filter(tstop_1y > tstart_1y) |> # keep only those still event-free & in-cohort at 1 year
   group_by(id_cluster) %>%
   mutate(n_cluster = n()) %>%
   ungroup() %>%
@@ -397,7 +410,7 @@ sens_summary <- bind_rows(landmark_m3, sens_m3, unavailable) |>
     `HR (95% CI)` = if_else(
       is.na(estimate),
       NA_character_,
-      sprintf("%.2f (%.2f, %.2f)", estimate, conf.low, conf.high)
+      sprintf("%.3f (%.3f, %.3f)", estimate, conf.low, conf.high)
     )
   )
 
